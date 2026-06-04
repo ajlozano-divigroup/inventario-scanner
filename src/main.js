@@ -5,7 +5,7 @@
 import './style.css';
 import { initDB, saveInventory, getAllInventory, getInventoryCount, saveScan, getAllScans, getScansCount, isScanDuplicate, saveSession, getSession, clearAll, clearScans } from './inventory/storage.js';
 import { parseExcelFile, cleanReference, buildInventoryItems } from './inventory/importer.js';
-import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported } from './scanner/scanner.js';
+import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus } from './scanner/scanner.js';
 import { findMatch, buildInventoryMap, computeStats, categorizeResults } from './inventory/matcher.js';
 import { showToast, showSuccess, showError, showWarning, showInfo } from './ui/toast.js';
 import { exportReport } from './export/exporter.js';
@@ -355,6 +355,12 @@ function bindScanner() {
     const val = Math.max(parseFloat(slider.value) - 0.5, parseFloat(slider.min));
     slider.value = val;
     slider.dispatchEvent(new Event('input'));
+  });
+
+  // Tap-to-focus: touching the camera viewport re-triggers autofocus
+  document.querySelector('.scanner-viewport').addEventListener('click', () => {
+    triggerRefocus();
+    showInfo('Reenfocando...');
   });
 }
 

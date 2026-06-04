@@ -1,6 +1,7 @@
 /**
  * Scanner module — wraps html5-qrcode for barcode/QR scanning
- * Supports: torch (flashlight), zoom, pause/resume
+ * Optimized for reading barcodes on physical labels (often blurry/small)
+ * Supports: torch (flashlight), zoom, continuous autofocus, high resolution
  */
 import { Html5Qrcode } from 'html5-qrcode';
 
@@ -15,7 +16,7 @@ let lastScanTime = 0;
 const DEBOUNCE_MS = 1500; // Prevent rapid re-scans of same code
 
 /**
- * Start the scanner
+ * Start the scanner with optimized settings for barcode reading
  * @param {string} elementId - The ID of the container element
  * @param {Function} onScan - Callback(decodedText, format) called on each successful scan
  * @returns {Promise<void>}
@@ -27,13 +28,15 @@ export async function startScanner(elementId, onScan) {
   html5Qrcode = new Html5Qrcode(elementId);
 
   const config = {
-    fps: 15,
+    fps: 20,  // Higher FPS for faster detection
     qrbox: (viewfinderWidth, viewfinderHeight) => {
-      const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-      const size = Math.floor(minEdge * 0.7);
-      return { width: size, height: Math.floor(size * 0.6) };
+      // Larger scan area = better chance of reading
+      const w = Math.floor(viewfinderWidth * 0.85);
+      const h = Math.floor(viewfinderHeight * 0.5);
+      return { width: w, height: h };
     },
     aspectRatio: 1.333,
+    disableFlip: false,
     formatsToSupport: [
       0,  // QR_CODE
       1,  // AZTEC
@@ -42,7 +45,7 @@ export async function startScanner(elementId, onScan) {
       4,  // CODE_93
       5,  // CODE_128
       6,  // DATA_MATRIX
-      7,  // MAXICODE (ITF)
+      7,  // ITF
       8,  // EAN_13
       9,  // EAN_8
       10, // PDF_417
@@ -57,9 +60,20 @@ export async function startScanner(elementId, onScan) {
     }
   };
 
+  // Request high resolution + continuous autofocus
+  const cameraConstraints = {
+    facingMode: 'environment',
+    width: { ideal: 1920, min: 1280 },
+    height: { ideal: 1080, min: 720 },
+    focusMode: { ideal: 'continuous' },
+    // Prefer a wider aperture / higher exposure for reading labels
+    exposureMode: { ideal: 'continuous' },
+    whiteBalanceMode: { ideal: 'continuous' }
+  };
+
   try {
     await html5Qrcode.start(
-      { facingMode: 'environment' },
+      cameraConstraints,
       config,
       (decodedText, result) => {
         const now = Date.now();
@@ -85,14 +99,92 @@ export async function startScanner(elementId, onScan) {
 
     isRunning = true;
 
-    // Get the video track for torch/zoom
+    // Get the video track for torch/zoom/focus
     const videoElement = document.querySelector(`#${elementId} video`);
     if (videoElement && videoElement.srcObject) {
       currentStream = videoElement.srcObject;
+      // Apply advanced camera settings after stream is established
+      await applyAdvancedCameraSettings();
     }
   } catch (err) {
     console.error('Error starting scanner:', err);
     throw err;
+  }
+}
+
+/**
+ * Apply advanced camera settings for better barcode reading:
+ * - Continuous autofocus
+ * - Higher resolution
+ * - Continuous exposure
+ */
+async function applyAdvancedCameraSettings() {
+  const track = getVideoTrack();
+  if (!track) return;
+
+  try {
+    const capabilities = track.getCapabilities();
+    const advancedConstraints = {};
+
+    // Enable continuous autofocus if supported
+    if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
+      advancedConstraints.focusMode = 'continuous';
+    }
+
+    // Enable continuous exposure if supported
+    if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
+      advancedConstraints.exposureMode = 'continuous';
+    }
+
+    // Enable continuous white balance if supported
+    if (capabilities.whiteBalanceMode && capabilities.whiteBalanceMode.includes('continuous')) {
+      advancedConstraints.whiteBalanceMode = 'continuous';
+    }
+
+    if (Object.keys(advancedConstraints).length > 0) {
+      await track.applyConstraints({
+        advanced: [advancedConstraints]
+      });
+      console.log('Advanced camera settings applied:', advancedConstraints);
+    }
+  } catch (err) {
+    console.warn('Could not apply advanced camera settings:', err);
+  }
+}
+
+/**
+ * Trigger a manual focus attempt (tap-to-focus)
+ * Switches focus mode to 'manual' briefly, then back to 'continuous'
+ * Some devices respond to this by re-triggering autofocus
+ */
+export async function triggerRefocus() {
+  const track = getVideoTrack();
+  if (!track) return;
+
+  try {
+    const capabilities = track.getCapabilities();
+
+    if (capabilities.focusMode) {
+      // Toggle focus mode to retrigger autofocus
+      if (capabilities.focusMode.includes('manual')) {
+        await track.applyConstraints({
+          advanced: [{ focusMode: 'manual' }]
+        });
+      }
+
+      // Switch back to continuous after a brief pause
+      setTimeout(async () => {
+        try {
+          if (capabilities.focusMode.includes('continuous')) {
+            await track.applyConstraints({
+              advanced: [{ focusMode: 'continuous' }]
+            });
+          }
+        } catch { /* ignore */ }
+      }, 200);
+    }
+  } catch (err) {
+    console.warn('Refocus failed:', err);
   }
 }
 
