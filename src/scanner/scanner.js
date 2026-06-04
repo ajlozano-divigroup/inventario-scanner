@@ -45,13 +45,8 @@ export async function startScanner(elementId, onScan) {
   };
 
   try {
-    // Use only facingMode + ideal resolution (no min — avoids OverconstrainedError)
     await html5Qrcode.start(
-      {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
-      },
+      { facingMode: 'environment' },
       config,
       (decodedText, result) => {
         handleDecode(decodedText, result);
