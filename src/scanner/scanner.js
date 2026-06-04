@@ -29,23 +29,23 @@ export async function startScanner(elementId, onScan) {
   const hasNativeDetector = 'BarcodeDetector' in window;
 
   const config = {
-    fps: 8,
-    qrbox: (viewfinderWidth, viewfinderHeight) => ({
-      width: Math.floor(viewfinderWidth * 0.95),
-      height: Math.floor(viewfinderHeight * 0.80)
-    }),
+    fps: 10,
+    // NO qrbox — scan the ENTIRE camera frame.
+    // qrbox cropping was cutting off barcodes and reducing resolution.
     disableFlip: false,
     experimentalFeatures: {
-      // ALWAYS use native BarcodeDetector — it handles formats and
-      // orientations that ZXing cannot (e.g. the Code 39 vertical barcode).
-      // Other scanner apps use this same API and read the barcode fine.
       useBarCodeDetectorIfSupported: true
     }
   };
 
   try {
+    // Request HD resolution with ideal constraints (won't fail if unsupported)
     await html5Qrcode.start(
-      { facingMode: 'environment' },
+      {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
       config,
       (decodedText, result) => {
         const now = Date.now();
@@ -321,17 +321,15 @@ export function startDetectionOverlay(elementId, canvasId) {
       ctx.fillText(barcode.rawValue, labelX, labelY);
     }
 
-    // Status indicator
-    ctx.font = '12px Inter, sans-serif';
+    // Status indicator with debug info
+    ctx.font = '11px Inter, sans-serif';
     ctx.fillStyle = allBarcodes.length > 0
-      ? 'rgba(34, 197, 94, 0.7)'
-      : 'rgba(255,255,255,0.4)';
-    ctx.fillText(
-      allBarcodes.length > 0
-        ? `✅ ${allBarcodes.length} código(s) detectado(s)`
-        : '🔍 Buscando códigos...',
-      10, canvas.height - 10
-    );
+      ? 'rgba(34, 197, 94, 0.8)'
+      : 'rgba(255,255,255,0.5)';
+    const statusText = allBarcodes.length > 0
+      ? `✅ ${allBarcodes.length} código(s) | ${vw}×${vh}`
+      : `🔍 Buscando... | Cámara: ${vw}×${vh} | API nativa: ${'BarcodeDetector' in window ? 'SÍ' : 'NO'}`;
+    ctx.fillText(statusText, 10, canvas.height - 10);
   }, 200); // 5 times per second
 }
 
