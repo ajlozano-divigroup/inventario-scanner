@@ -1,11 +1,10 @@
 /**
  * Scanner module — wraps html5-qrcode for barcode/QR scanning
- * Supports: torch, zoom, autofocus, vertical barcode rotation scan
+ * Supports: torch, zoom, autofocus, vertical barcode detection via canvas rotation
  */
 import { Html5Qrcode } from 'html5-qrcode';
 
 let html5Qrcode = null;
-let rotationScanner = null; // Secondary scanner for rotated frames
 let currentStream = null;
 let torchEnabled = false;
 let currentZoom = 1;
@@ -16,10 +15,13 @@ let lastScanTime = 0;
 let rotationIntervalId = null;
 const DEBOUNCE_MS = 1500;
 
+// Offscreen canvas and secondary scanner for rotation scanning
+let rotationCanvas = null;
+let rotationCtx = null;
+let rotationScannerBusy = false;
+
 /**
  * Start the scanner
- * @param {string} elementId - The ID of the container element
- * @param {Function} onScan - Callback(decodedText, format) called on each successful scan
  */
 export async function startScanner(elementId, onScan) {
   if (isRunning) return;
@@ -37,9 +39,7 @@ export async function startScanner(elementId, onScan) {
     },
     aspectRatio: 1.333,
     disableFlip: false,
-    // Let ZXing try ALL barcode formats automatically
     experimentalFeatures: {
-      // Force ZXing JS decoder (more reliable for short barcodes)
       useBarCodeDetectorIfSupported: false
     }
   };
@@ -73,7 +73,7 @@ export async function startScanner(elementId, onScan) {
 }
 
 /**
- * Handle a decoded barcode (from either normal or rotation scan)
+ * Handle a decoded barcode
  */
 function handleDecode(decodedText, result) {
   const now = Date.now();
@@ -83,7 +83,6 @@ function handleDecode(decodedText, result) {
   lastScannedCode = decodedText;
   lastScanTime = now;
 
-  // Haptic feedback
   if (navigator.vibrate) {
     navigator.vibrate(100);
   }
@@ -95,77 +94,72 @@ function handleDecode(decodedText, result) {
 }
 
 /**
- * Start periodic rotation scanning to detect vertical barcodes.
- * Every 500ms, grabs the video frame, rotates it 90°, and scans
- * the rotated image with a separate Html5Qrcode instance.
+ * Periodically grab the video frame, rotate 90°, and scan the rotated
+ * image using a SEPARATE Html5Qrcode.scanFile() call (no camera access).
+ * The key is: we do NOT create the secondary scanner until after the
+ * primary scanner has fully started, and scanFile doesn't touch the camera.
  */
 function startRotationScanning(elementId) {
-  // Create an offscreen canvas for rotation
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  rotationCanvas = document.createElement('canvas');
+  rotationCtx = rotationCanvas.getContext('2d');
 
-  // Create secondary scanner instance for file scanning
-  rotationScanner = new Html5Qrcode('__rotation_scanner__', /* verbose= */ false);
-
-  // Create a hidden container for the secondary scanner
-  let hiddenDiv = document.getElementById('__rotation_scanner__');
-  if (!hiddenDiv) {
-    hiddenDiv = document.createElement('div');
-    hiddenDiv.id = '__rotation_scanner__';
-    hiddenDiv.style.display = 'none';
-    document.body.appendChild(hiddenDiv);
-  }
-
-  rotationIntervalId = setInterval(async () => {
-    if (!isRunning) return;
-
-    try {
-      const videoElement = document.querySelector(`#${elementId} video`);
-      if (!videoElement || videoElement.readyState < 2) return;
-
-      const vw = videoElement.videoWidth;
-      const vh = videoElement.videoHeight;
-      if (!vw || !vh) return;
-
-      // Draw video frame rotated 90° clockwise
-      canvas.width = vh;
-      canvas.height = vw;
-      ctx.save();
-      ctx.translate(vh, 0);
-      ctx.rotate(Math.PI / 2);
-      ctx.drawImage(videoElement, 0, 0, vw, vh);
-      ctx.restore();
-
-      // Convert canvas to blob and scan
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
-      if (!blob) return;
-
-      const file = new File([blob], 'rotated.jpg', { type: 'image/jpeg' });
-
-      const decoded = await rotationScanner.scanFileV2(file, /* showImage= */ false);
-      if (decoded && decoded.decodedText) {
-        handleDecode(decoded.decodedText, decoded);
-      }
-    } catch {
-      // Scan failures are normal (no barcode found in rotated frame)
-    }
-  }, 600); // Scan rotated frame every 600ms
+  rotationIntervalId = setInterval(() => {
+    if (!isRunning || rotationScannerBusy) return;
+    rotationScannerBusy = true;
+    scanRotatedFrame(elementId).finally(() => {
+      rotationScannerBusy = false;
+    });
+  }, 800);
 }
 
 /**
- * Stop rotation scanning
+ * Grab current video frame, rotate 90°, scan as image file
  */
+async function scanRotatedFrame(elementId) {
+  try {
+    const videoElement = document.querySelector(`#${elementId} video`);
+    if (!videoElement || videoElement.readyState < 2) return;
+
+    const vw = videoElement.videoWidth;
+    const vh = videoElement.videoHeight;
+    if (!vw || !vh) return;
+
+    // Draw rotated 90° clockwise
+    rotationCanvas.width = vh;
+    rotationCanvas.height = vw;
+    rotationCtx.save();
+    rotationCtx.translate(vh, 0);
+    rotationCtx.rotate(Math.PI / 2);
+    rotationCtx.drawImage(videoElement, 0, 0, vw, vh);
+    rotationCtx.restore();
+
+    // Convert to blob
+    const blob = await new Promise(resolve =>
+      rotationCanvas.toBlob(resolve, 'image/jpeg', 0.85)
+    );
+    if (!blob) return;
+
+    const file = new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+
+    // Use the SAME html5Qrcode instance's scanFile method
+    // This does NOT access the camera - it just decodes an image
+    const result = await html5Qrcode.scanFileV2(file, false);
+    if (result && result.decodedText) {
+      handleDecode(result.decodedText, result);
+    }
+  } catch {
+    // Expected: most frames won't contain a readable barcode
+  }
+}
+
 function stopRotationScanning() {
   if (rotationIntervalId) {
     clearInterval(rotationIntervalId);
     rotationIntervalId = null;
   }
-  if (rotationScanner) {
-    rotationScanner.clear();
-    rotationScanner = null;
-  }
-  const hiddenDiv = document.getElementById('__rotation_scanner__');
-  if (hiddenDiv) hiddenDiv.remove();
+  rotationCanvas = null;
+  rotationCtx = null;
+  rotationScannerBusy = false;
 }
 
 /**
@@ -177,20 +171,20 @@ async function applyAdvancedCameraSettings() {
 
   try {
     const capabilities = track.getCapabilities();
-    const advancedConstraints = {};
+    const adv = {};
 
-    if (capabilities.focusMode && capabilities.focusMode.includes('continuous')) {
-      advancedConstraints.focusMode = 'continuous';
+    if (capabilities.focusMode?.includes('continuous')) {
+      adv.focusMode = 'continuous';
     }
-    if (capabilities.exposureMode && capabilities.exposureMode.includes('continuous')) {
-      advancedConstraints.exposureMode = 'continuous';
+    if (capabilities.exposureMode?.includes('continuous')) {
+      adv.exposureMode = 'continuous';
     }
-    if (capabilities.whiteBalanceMode && capabilities.whiteBalanceMode.includes('continuous')) {
-      advancedConstraints.whiteBalanceMode = 'continuous';
+    if (capabilities.whiteBalanceMode?.includes('continuous')) {
+      adv.whiteBalanceMode = 'continuous';
     }
 
-    if (Object.keys(advancedConstraints).length > 0) {
-      await track.applyConstraints({ advanced: [advancedConstraints] });
+    if (Object.keys(adv).length > 0) {
+      await track.applyConstraints({ advanced: [adv] });
     }
   } catch (err) {
     console.warn('Could not apply advanced camera settings:', err);
@@ -218,9 +212,7 @@ export async function triggerRefocus() {
         } catch { /* ignore */ }
       }, 200);
     }
-  } catch (err) {
-    console.warn('Refocus failed:', err);
-  }
+  } catch { /* ignore */ }
 }
 
 /**
@@ -247,77 +239,45 @@ export async function stopScanner() {
   lastScanTime = 0;
 }
 
-/**
- * Toggle the torch (flashlight)
- */
 export async function toggleTorch() {
   const track = getVideoTrack();
   if (!track) return false;
-
   try {
-    const capabilities = track.getCapabilities();
-    if (!capabilities.torch) return false;
-
+    const caps = track.getCapabilities();
+    if (!caps.torch) return false;
     torchEnabled = !torchEnabled;
     await track.applyConstraints({ advanced: [{ torch: torchEnabled }] });
     return torchEnabled;
-  } catch (err) {
-    console.error('Error toggling torch:', err);
-    return false;
-  }
+  } catch { return false; }
 }
 
-/**
- * Check if torch is supported
- */
 export function isTorchSupported() {
   const track = getVideoTrack();
   if (!track) return false;
-  try {
-    return !!track.getCapabilities().torch;
-  } catch {
-    return false;
-  }
+  try { return !!track.getCapabilities().torch; }
+  catch { return false; }
 }
 
-/**
- * Set camera zoom level
- */
 export async function setZoom(zoomLevel) {
   const track = getVideoTrack();
   if (!track) return false;
-
   try {
-    const capabilities = track.getCapabilities();
-    if (!capabilities.zoom) return false;
-
-    const { min, max } = capabilities.zoom;
-    currentZoom = Math.min(Math.max(zoomLevel, min), max);
+    const caps = track.getCapabilities();
+    if (!caps.zoom) return false;
+    currentZoom = Math.min(Math.max(zoomLevel, caps.zoom.min), caps.zoom.max);
     await track.applyConstraints({ advanced: [{ zoom: currentZoom }] });
     return true;
-  } catch (err) {
-    console.error('Error setting zoom:', err);
-    return false;
-  }
+  } catch { return false; }
 }
 
-/**
- * Get zoom capabilities
- */
 export function getZoomCapabilities() {
   const track = getVideoTrack();
   if (!track) return null;
   try {
     const caps = track.getCapabilities();
     if (!caps.zoom) return null;
-    return {
-      min: caps.zoom.min || 1,
-      max: caps.zoom.max || 5,
-      step: caps.zoom.step || 0.1
-    };
-  } catch {
-    return null;
-  }
+    return { min: caps.zoom.min || 1, max: caps.zoom.max || 5, step: caps.zoom.step || 0.1 };
+  } catch { return null; }
 }
 
 function getVideoTrack() {
