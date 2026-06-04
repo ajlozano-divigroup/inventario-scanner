@@ -5,7 +5,7 @@
 import './style.css';
 import { initDB, saveInventory, getAllInventory, getInventoryCount, saveScan, getAllScans, getScansCount, isScanDuplicate, saveSession, getSession, clearAll, clearScans } from './inventory/storage.js';
 import { parseExcelFile, cleanReference, buildInventoryItems } from './inventory/importer.js';
-import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus, captureAndScan } from './scanner/scanner.js';
+import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus, captureAndScan, startDetectionOverlay, stopDetectionOverlay } from './scanner/scanner.js';
 import { findMatch, buildInventoryMap, computeStats, categorizeResults } from './inventory/matcher.js';
 import { showToast, showSuccess, showError, showWarning, showInfo } from './ui/toast.js';
 import { exportReport } from './export/exporter.js';
@@ -81,6 +81,7 @@ function navigateTo(screenId) {
 
   // Before leaving scanner, stop it
   if (currentScreen === 'scanner' && screenId !== 'scanner') {
+    stopDetectionOverlay();
     stopScanner().catch(() => {});
   }
 
@@ -332,6 +333,7 @@ async function confirmImport() {
 // ============================================================
 function bindScanner() {
   document.getElementById('btn-stop-scan').addEventListener('click', () => {
+    stopDetectionOverlay();
     stopScanner().catch(() => {});
   });
 
@@ -433,6 +435,9 @@ async function startScannerScreen() {
 
   try {
     await startScanner('scanner-reader', handleScanResult);
+
+    // Start visual detection overlay (draws bounding boxes around detected barcodes)
+    startDetectionOverlay('scanner-reader', 'detection-canvas');
 
     // Setup zoom capabilities after scanner starts
     setTimeout(() => {

@@ -14,6 +14,7 @@ let isRunning = false;
 let lastScannedCode = '';
 let lastScanTime = 0;
 const DEBOUNCE_MS = 1500;
+let detectionOverlayId = null;
 
 /**
  * Start the scanner
@@ -187,6 +188,111 @@ function getVideoTrack() {
 export function isScannerRunning() { return isRunning; }
 export function isTorchEnabled() { return torchEnabled; }
 export function getCurrentZoom() { return currentZoom; }
+
+/**
+ * Start a visual detection overlay that draws bounding boxes
+ * around any barcodes the native BarcodeDetector can see.
+ * This runs independently from html5-qrcode scanning.
+ */
+export function startDetectionOverlay(elementId, canvasId) {
+  if (!('BarcodeDetector' in window)) {
+    console.warn('BarcodeDetector not available — no detection overlay');
+    return;
+  }
+
+  const detector = new BarcodeDetector({
+    formats: [
+      'code_39', 'code_128', 'code_93',
+      'ean_13', 'ean_8',
+      'upc_a', 'upc_e',
+      'itf', 'codabar',
+      'qr_code', 'data_matrix', 'aztec', 'pdf417'
+    ]
+  });
+
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+
+  detectionOverlayId = setInterval(async () => {
+    if (!isRunning) return;
+
+    const videoElement = document.querySelector(`#${elementId} video`);
+    if (!videoElement || videoElement.readyState < 2) return;
+
+    // Match canvas size to video display size
+    const rect = videoElement.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+
+    // Scale factors: video resolution → display size
+    const sx = rect.width / videoElement.videoWidth;
+    const sy = rect.height / videoElement.videoHeight;
+
+    // Clear previous frame
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    try {
+      const barcodes = await detector.detect(videoElement);
+
+      for (const barcode of barcodes) {
+        const points = barcode.cornerPoints;
+        if (!points || points.length < 4) continue;
+
+        // Draw polygon around barcode
+        ctx.beginPath();
+        ctx.moveTo(points[0].x * sx, points[0].y * sy);
+        for (let i = 1; i < points.length; i++) {
+          ctx.lineTo(points[i].x * sx, points[i].y * sy);
+        }
+        ctx.closePath();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#22c55e';
+        ctx.stroke();
+
+        // Draw corner dots
+        for (const p of points) {
+          ctx.beginPath();
+          ctx.arc(p.x * sx, p.y * sy, 5, 0, Math.PI * 2);
+          ctx.fillStyle = '#22c55e';
+          ctx.fill();
+        }
+
+        // Draw label with value
+        const labelX = points[0].x * sx;
+        const labelY = points[0].y * sy - 10;
+        ctx.font = 'bold 14px Inter, sans-serif';
+        ctx.fillStyle = '#000';
+        ctx.strokeStyle = '#22c55e';
+        ctx.lineWidth = 3;
+        ctx.strokeText(barcode.rawValue, labelX, labelY);
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText(barcode.rawValue, labelX, labelY);
+      }
+
+      // If no barcodes found, show subtle "scanning" indicator
+      if (barcodes.length === 0) {
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillText('🔍 Buscando códigos...', 10, canvas.height - 10);
+      }
+    } catch {
+      // detect() can fail on some frames
+    }
+  }, 250); // 4 times per second
+}
+
+export function stopDetectionOverlay() {
+  if (detectionOverlayId) {
+    clearInterval(detectionOverlayId);
+    detectionOverlayId = null;
+  }
+  const canvas = document.getElementById('detection-canvas');
+  if (canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+}
 
 /**
  * Capture current video frame, rotate it in 4 angles, and try to
