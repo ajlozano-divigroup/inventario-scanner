@@ -28,32 +28,23 @@ export async function startScanner(elementId, onScan) {
   html5Qrcode = new Html5Qrcode(elementId);
 
   const config = {
-    fps: 15,
-    // NO qrbox = scan the ENTIRE camera frame.
-    // This is critical for small barcodes that would otherwise
-    // fall outside a restricted scan region.
+    fps: 10,
+    // Large scan area - covers most of the viewfinder
+    qrbox: (viewfinderWidth, viewfinderHeight) => {
+      return {
+        width: Math.floor(viewfinderWidth * 0.9),
+        height: Math.floor(viewfinderHeight * 0.6)
+      };
+    },
     aspectRatio: 1.333,
     disableFlip: false,
-    formatsToSupport: [
-      0,  // QR_CODE
-      1,  // AZTEC
-      2,  // CODABAR
-      3,  // CODE_39
-      4,  // CODE_93
-      5,  // CODE_128
-      6,  // DATA_MATRIX
-      7,  // ITF
-      8,  // EAN_13
-      9,  // EAN_8
-      10, // PDF_417
-      11, // RSS_14
-      12, // RSS_EXPANDED
-      13, // UPC_A
-      14, // UPC_E
-      15, // UPC_EAN_EXTENSION
-    ],
+    // Do NOT specify formatsToSupport — let ZXing try ALL decoders.
+    // This avoids issues with wrong enum values and maximizes compatibility.
     experimentalFeatures: {
-      useBarCodeDetectorIfSupported: true
+      // DISABLE native BarcodeDetector API.
+      // Force ZXing JS decoder which is more reliable for
+      // short barcodes (few bars) like Code 39 with 6 digits.
+      useBarCodeDetectorIfSupported: false
     }
   };
 
