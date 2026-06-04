@@ -272,6 +272,19 @@
           📸 Capturar y escanear (códigos difíciles)
         </button>
 
+        <!-- Manual input for unreadable barcodes -->
+        <div id="manual-input-section" class="manual-input-section">
+          <button id="btn-show-manual" class="manual-toggle-btn">
+            ✏️ Introducir código manualmente
+          </button>
+          <div id="manual-input-form" class="manual-input-form hidden">
+            <input type="text" id="manual-code-input" class="manual-input"
+                   placeholder="Escribe el código de la etiqueta..."
+                   inputmode="text" autocomplete="off" />
+            <button id="btn-submit-manual" class="manual-submit-btn">Añadir</button>
+          </div>
+        </div>
+
         <!-- Scan result popup -->
         <div id="scan-result" class="scan-result hidden">
           <div id="scan-result-inner" class="scan-result-inner glass-card">

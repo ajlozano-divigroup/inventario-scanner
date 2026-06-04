@@ -916,6 +916,70 @@ body::before {
   cursor: not-allowed;
 }
 
+/* ---------- Manual Input ---------- */
+.manual-input-section {
+  margin: 0 var(--space-md);
+}
+
+.manual-toggle-btn {
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.manual-toggle-btn:active {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--accent-primary);
+  color: var(--accent-secondary);
+}
+
+.manual-input-form {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.manual-input {
+  flex: 1;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-base);
+  outline: none;
+}
+
+.manual-input:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.manual-submit-btn {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent-gradient);
+  color: white;
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.manual-submit-btn:active {
+  transform: scale(0.95);
+}
+
 /* ---------- Scan Result Popup ---------- */
 .scan-result {
   padding: var(--space-sm) var(--space-md);

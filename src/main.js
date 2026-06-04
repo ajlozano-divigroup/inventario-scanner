@@ -386,6 +386,36 @@ function bindScanner() {
     btn.disabled = false;
     btn.textContent = '📸 Capturar y escanear (códigos difíciles)';
   });
+
+  // Manual input: toggle form visibility
+  document.getElementById('btn-show-manual').addEventListener('click', () => {
+    const form = document.getElementById('manual-input-form');
+    const isHidden = form.classList.toggle('hidden');
+    if (!isHidden) {
+      document.getElementById('manual-code-input').focus();
+    }
+  });
+
+  // Manual input: submit code
+  const submitManualCode = () => {
+    const input = document.getElementById('manual-code-input');
+    const code = input.value.trim();
+    if (!code) {
+      showWarning('Escribe un código primero');
+      return;
+    }
+    handleScanResult(code, 'MANUAL');
+    showSuccess(`Código añadido: ${code}`);
+    input.value = '';
+  };
+
+  document.getElementById('btn-submit-manual').addEventListener('click', submitManualCode);
+  document.getElementById('manual-code-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitManualCode();
+    }
+  });
 }
 
 async function startScannerScreen() {
