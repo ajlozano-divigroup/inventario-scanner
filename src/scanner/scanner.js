@@ -214,72 +214,125 @@ export function startDetectionOverlay(elementId, canvasId) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
+  // Offscreen canvas for image preprocessing
+  const procCanvas = document.createElement('canvas');
+  const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
+
   detectionOverlayId = setInterval(async () => {
     if (!isRunning) return;
 
     const videoElement = document.querySelector(`#${elementId} video`);
     if (!videoElement || videoElement.readyState < 2) return;
 
-    // Match canvas size to video display size
+    const vw = videoElement.videoWidth;
+    const vh = videoElement.videoHeight;
+    if (!vw || !vh) return;
+
+    // Match display canvas to video display size
     const rect = videoElement.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
 
     // Scale factors: video resolution → display size
-    const sx = rect.width / videoElement.videoWidth;
-    const sy = rect.height / videoElement.videoHeight;
+    const sx = rect.width / vw;
+    const sy = rect.height / vh;
 
     // Clear previous frame
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    let allBarcodes = [];
+
     try {
-      const barcodes = await detector.detect(videoElement);
+      // === Pass 1: Try raw video frame (fast) ===
+      const rawBarcodes = await detector.detect(videoElement);
+      allBarcodes.push(...rawBarcodes);
 
-      for (const barcode of barcodes) {
-        const points = barcode.cornerPoints;
-        if (!points || points.length < 4) continue;
+      // === Pass 2: Try contrast-enhanced frame (for faded/low-contrast barcodes) ===
+      if (rawBarcodes.length === 0) {
+        procCanvas.width = vw;
+        procCanvas.height = vh;
+        procCtx.drawImage(videoElement, 0, 0, vw, vh);
 
-        // Draw polygon around barcode
-        ctx.beginPath();
-        ctx.moveTo(points[0].x * sx, points[0].y * sy);
-        for (let i = 1; i < points.length; i++) {
-          ctx.lineTo(points[i].x * sx, points[i].y * sy);
+        // Apply contrast enhancement + binary threshold
+        const imageData = procCtx.getImageData(0, 0, vw, vh);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+          // Convert to grayscale
+          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+
+          // Increase contrast (stretch histogram)
+          const contrast = 2.0; // 2x contrast boost
+          const adjusted = ((gray / 255 - 0.5) * contrast + 0.5) * 255;
+
+          // Binary threshold: make it pure black or white
+          const bw = adjusted > 128 ? 255 : 0;
+
+          data[i] = bw;
+          data[i + 1] = bw;
+          data[i + 2] = bw;
         }
-        ctx.closePath();
-        ctx.lineWidth = 3;
-        ctx.strokeStyle = '#22c55e';
-        ctx.stroke();
 
-        // Draw corner dots
-        for (const p of points) {
-          ctx.beginPath();
-          ctx.arc(p.x * sx, p.y * sy, 5, 0, Math.PI * 2);
-          ctx.fillStyle = '#22c55e';
-          ctx.fill();
-        }
+        procCtx.putImageData(imageData, 0, 0);
 
-        // Draw label with value
-        const labelX = points[0].x * sx;
-        const labelY = points[0].y * sy - 10;
-        ctx.font = 'bold 14px Inter, sans-serif';
-        ctx.fillStyle = '#000';
-        ctx.strokeStyle = '#22c55e';
-        ctx.lineWidth = 3;
-        ctx.strokeText(barcode.rawValue, labelX, labelY);
-        ctx.fillStyle = '#22c55e';
-        ctx.fillText(barcode.rawValue, labelX, labelY);
-      }
-
-      // If no barcodes found, show subtle "scanning" indicator
-      if (barcodes.length === 0) {
-        ctx.font = '12px Inter, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.fillText('🔍 Buscando códigos...', 10, canvas.height - 10);
+        const enhancedBarcodes = await detector.detect(procCanvas);
+        allBarcodes.push(...enhancedBarcodes);
       }
     } catch {
       // detect() can fail on some frames
     }
-  }, 250); // 4 times per second
+
+    // Draw results
+    for (const barcode of allBarcodes) {
+      const points = barcode.cornerPoints;
+      if (!points || points.length < 4) continue;
+
+      // Draw polygon around barcode
+      ctx.beginPath();
+      ctx.moveTo(points[0].x * sx, points[0].y * sy);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x * sx, points[i].y * sy);
+      }
+      ctx.closePath();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#22c55e';
+      ctx.stroke();
+
+      // Fill with semi-transparent green
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.1)';
+      ctx.fill();
+
+      // Draw corner dots
+      for (const p of points) {
+        ctx.beginPath();
+        ctx.arc(p.x * sx, p.y * sy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#22c55e';
+        ctx.fill();
+      }
+
+      // Draw label with value
+      const labelX = points[0].x * sx;
+      const labelY = points[0].y * sy - 12;
+      ctx.font = 'bold 16px Inter, sans-serif';
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = '#000';
+      ctx.strokeText(barcode.rawValue, labelX, labelY);
+      ctx.fillStyle = '#22c55e';
+      ctx.fillText(barcode.rawValue, labelX, labelY);
+    }
+
+    // Status indicator
+    ctx.font = '12px Inter, sans-serif';
+    ctx.fillStyle = allBarcodes.length > 0
+      ? 'rgba(34, 197, 94, 0.7)'
+      : 'rgba(255,255,255,0.4)';
+    ctx.fillText(
+      allBarcodes.length > 0
+        ? `✅ ${allBarcodes.length} código(s) detectado(s)`
+        : '🔍 Buscando códigos...',
+      10, canvas.height - 10
+    );
+  }, 200); // 5 times per second
 }
 
 export function stopDetectionOverlay() {
