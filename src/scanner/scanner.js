@@ -195,6 +195,11 @@ export function getCurrentZoom() { return currentZoom; }
  * This is a manual fallback for barcodes that the live scanner can't
  * read (e.g. vertical 1D barcodes).
  *
+ * Strategy:
+ * 1. Try native BarcodeDetector API first (handles all orientations correctly)
+ * 2. Fall back to ZXing with 0° and 90° rotations + horizontal flip
+ *    (180°/270° cause reversed reads → wrong data like 731311 instead of 600134)
+ *
  * @param {string} elementId - Scanner container element ID
  * @returns {Promise<{text: string, format: string} | null>}
  */
@@ -206,77 +211,98 @@ export async function captureAndScan(elementId) {
   const vh = videoElement.videoHeight;
   if (!vw || !vh) return null;
 
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  const rotations = [0, 90, 180, 270];
+  // === Strategy 1: Native BarcodeDetector (best — handles orientation + direction) ===
+  if ('BarcodeDetector' in window) {
+    try {
+      const detector = new BarcodeDetector({
+        formats: [
+          'code_39', 'code_128', 'code_93',
+          'ean_13', 'ean_8',
+          'upc_a', 'upc_e',
+          'itf', 'codabar',
+          'qr_code', 'data_matrix', 'aztec', 'pdf417'
+        ]
+      });
 
-  for (const angle of rotations) {
-    // Set canvas size based on rotation
-    if (angle === 90 || angle === 270) {
+      // Try on the raw video frame first (handles all orientations natively)
+      const barcodes = await detector.detect(videoElement);
+      if (barcodes.length > 0) {
+        return { text: barcodes[0].rawValue, format: barcodes[0].format };
+      }
+
+      // If not found, try on a rotated canvas (some implementations
+      // still struggle with vertical 1D barcodes)
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
       canvas.width = vh;
       canvas.height = vw;
-    } else {
-      canvas.width = vw;
-      canvas.height = vh;
-    }
-
-    ctx.save();
-    // Translate + rotate
-    if (angle === 90) {
       ctx.translate(vh, 0);
-    } else if (angle === 180) {
-      ctx.translate(vw, vh);
-    } else if (angle === 270) {
-      ctx.translate(0, vw);
+      ctx.rotate(Math.PI / 2);
+      ctx.drawImage(videoElement, 0, 0, vw, vh);
+
+      const rotatedBarcodes = await detector.detect(canvas);
+      if (rotatedBarcodes.length > 0) {
+        return { text: rotatedBarcodes[0].rawValue, format: rotatedBarcodes[0].format };
+      }
+    } catch (err) {
+      console.warn('Native BarcodeDetector capture failed:', err);
     }
-    ctx.rotate((angle * Math.PI) / 180);
-    ctx.drawImage(videoElement, 0, 0, vw, vh);
+  }
+
+  // === Strategy 2: ZXing via html5-qrcode (fallback) ===
+  // Only use 0° and 90°. Do NOT use 180°/270° because they reverse
+  // the barcode reading direction, causing ZXing to decode wrong characters.
+  // Instead, for each angle also try a horizontal flip to cover both directions.
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const transforms = [
+    { label: '0°', setup: () => { canvas.width = vw; canvas.height = vh; ctx.drawImage(videoElement, 0, 0); } },
+    { label: '0° flip', setup: () => { canvas.width = vw; canvas.height = vh; ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(videoElement, 0, 0); } },
+    { label: '90°', setup: () => { canvas.width = vh; canvas.height = vw; ctx.translate(vh, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(videoElement, 0, 0); } },
+    { label: '90° flip', setup: () => { canvas.width = vh; canvas.height = vw; ctx.translate(0, 0); ctx.scale(-1, 1); ctx.translate(-vh, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(videoElement, 0, 0); } },
+  ];
+
+  // Create hidden container for temp scanner
+  let hiddenDiv = document.getElementById('__capture_scan__');
+  if (!hiddenDiv) {
+    hiddenDiv = document.createElement('div');
+    hiddenDiv.id = '__capture_scan__';
+    hiddenDiv.style.display = 'none';
+    document.body.appendChild(hiddenDiv);
+  }
+
+  for (const t of transforms) {
+    ctx.save();
+    t.setup();
     ctx.restore();
 
-    // Convert to blob and scan
     try {
       const blob = await new Promise(resolve =>
         canvas.toBlob(resolve, 'image/jpeg', 0.9)
       );
       if (!blob) continue;
 
-      const file = new File([blob], `capture_${angle}.jpg`, { type: 'image/jpeg' });
-
-      // Create a temporary scanner for file scanning
+      const file = new File([blob], `capture.jpg`, { type: 'image/jpeg' });
       const tempScanner = new Html5Qrcode('__capture_scan__', false);
-
-      // Create hidden container if needed
-      let hiddenDiv = document.getElementById('__capture_scan__');
-      if (!hiddenDiv) {
-        hiddenDiv = document.createElement('div');
-        hiddenDiv.id = '__capture_scan__';
-        hiddenDiv.style.display = 'none';
-        document.body.appendChild(hiddenDiv);
-      }
 
       try {
         const result = await tempScanner.scanFileV2(file, false);
         tempScanner.clear();
-        hiddenDiv.remove();
 
         if (result && result.decodedText) {
+          hiddenDiv.remove();
           return {
             text: result.decodedText,
-            format: result?.result?.format?.formatName || `rotated_${angle}°`
+            format: result?.result?.format?.formatName || t.label
           };
         }
       } catch {
-        // No barcode found at this angle — try next
         try { tempScanner.clear(); } catch { /* ignore */ }
       }
-    } catch {
-      // Canvas/blob error — try next angle
-    }
+    } catch { /* next transform */ }
   }
 
-  // Clean up hidden div
-  const hiddenDiv = document.getElementById('__capture_scan__');
   if (hiddenDiv) hiddenDiv.remove();
-
   return null;
 }
