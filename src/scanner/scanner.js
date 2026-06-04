@@ -28,13 +28,10 @@ export async function startScanner(elementId, onScan) {
   html5Qrcode = new Html5Qrcode(elementId);
 
   const config = {
-    fps: 20,  // Higher FPS for faster detection
-    qrbox: (viewfinderWidth, viewfinderHeight) => {
-      // Larger scan area = better chance of reading
-      const w = Math.floor(viewfinderWidth * 0.85);
-      const h = Math.floor(viewfinderHeight * 0.5);
-      return { width: w, height: h };
-    },
+    fps: 15,
+    // NO qrbox = scan the ENTIRE camera frame.
+    // This is critical for small barcodes that would otherwise
+    // fall outside a restricted scan region.
     aspectRatio: 1.333,
     disableFlip: false,
     formatsToSupport: [
@@ -61,11 +58,15 @@ export async function startScanner(elementId, onScan) {
   };
 
   try {
-    // html5-qrcode only accepts facingMode here, not full MediaTrackConstraints.
-    // Advanced settings (resolution, autofocus, etc.) are applied AFTER
-    // the stream starts, via applyAdvancedCameraSettings().
+    // Request HD resolution (width/height are valid getUserMedia constraints).
+    // Higher resolution = more pixels = small barcodes become readable.
+    // facingMode 'environment' = rear camera.
     await html5Qrcode.start(
-      { facingMode: 'environment' },
+      {
+        facingMode: 'environment',
+        width: { min: 640, ideal: 1920 },
+        height: { min: 480, ideal: 1080 }
+      },
       config,
       (decodedText, result) => {
         const now = Date.now();
