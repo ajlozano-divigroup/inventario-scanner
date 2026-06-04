@@ -901,6 +901,21 @@ body::before {
   text-align: right;
 }
 
+/* ---------- Capture Button ---------- */
+.capture-btn {
+  margin: var(--space-sm) var(--space-md);
+  font-size: var(--font-size-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(108, 92, 231, 0.3);
+  border: 1px solid rgba(108, 92, 231, 0.4);
+  box-shadow: none;
+}
+
+.capture-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* ---------- Scan Result Popup ---------- */
 .scan-result {
   padding: var(--space-sm) var(--space-md);

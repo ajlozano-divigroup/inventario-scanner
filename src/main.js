@@ -5,7 +5,7 @@
 import './style.css';
 import { initDB, saveInventory, getAllInventory, getInventoryCount, saveScan, getAllScans, getScansCount, isScanDuplicate, saveSession, getSession, clearAll, clearScans } from './inventory/storage.js';
 import { parseExcelFile, cleanReference, buildInventoryItems } from './inventory/importer.js';
-import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus } from './scanner/scanner.js';
+import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus, captureAndScan } from './scanner/scanner.js';
 import { findMatch, buildInventoryMap, computeStats, categorizeResults } from './inventory/matcher.js';
 import { showToast, showSuccess, showError, showWarning, showInfo } from './ui/toast.js';
 import { exportReport } from './export/exporter.js';
@@ -361,6 +361,30 @@ function bindScanner() {
   document.querySelector('.scanner-viewport').addEventListener('click', () => {
     triggerRefocus();
     showInfo('Reenfocando...');
+  });
+
+  // Capture button: manual photo scan for difficult barcodes (vertical, blurry)
+  document.getElementById('btn-capture').addEventListener('click', async () => {
+    const btn = document.getElementById('btn-capture');
+    btn.disabled = true;
+    btn.textContent = '⏳ Escaneando en 4 ángulos...';
+
+    try {
+      const result = await captureAndScan('scanner-reader');
+      if (result) {
+        // Found a barcode! Process it like a normal scan
+        handleScanResult(result.text, result.format);
+        showSuccess(`¡Código encontrado! ${result.text}`);
+      } else {
+        showWarning('No se detectó ningún código. Acerca más el móvil e intenta de nuevo.');
+      }
+    } catch (err) {
+      showError('Error al capturar');
+      console.error(err);
+    }
+
+    btn.disabled = false;
+    btn.textContent = '📸 Capturar y escanear (códigos difíciles)';
   });
 }
 

@@ -188,3 +188,95 @@ function getVideoTrack() {
 export function isScannerRunning() { return isRunning; }
 export function isTorchEnabled() { return torchEnabled; }
 export function getCurrentZoom() { return currentZoom; }
+
+/**
+ * Capture current video frame, rotate it in 4 angles, and try to
+ * scan each rotation. Returns the first successful decode or null.
+ * This is a manual fallback for barcodes that the live scanner can't
+ * read (e.g. vertical 1D barcodes).
+ *
+ * @param {string} elementId - Scanner container element ID
+ * @returns {Promise<{text: string, format: string} | null>}
+ */
+export async function captureAndScan(elementId) {
+  const videoElement = document.querySelector(`#${elementId} video`);
+  if (!videoElement || videoElement.readyState < 2) return null;
+
+  const vw = videoElement.videoWidth;
+  const vh = videoElement.videoHeight;
+  if (!vw || !vh) return null;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const rotations = [0, 90, 180, 270];
+
+  for (const angle of rotations) {
+    // Set canvas size based on rotation
+    if (angle === 90 || angle === 270) {
+      canvas.width = vh;
+      canvas.height = vw;
+    } else {
+      canvas.width = vw;
+      canvas.height = vh;
+    }
+
+    ctx.save();
+    // Translate + rotate
+    if (angle === 90) {
+      ctx.translate(vh, 0);
+    } else if (angle === 180) {
+      ctx.translate(vw, vh);
+    } else if (angle === 270) {
+      ctx.translate(0, vw);
+    }
+    ctx.rotate((angle * Math.PI) / 180);
+    ctx.drawImage(videoElement, 0, 0, vw, vh);
+    ctx.restore();
+
+    // Convert to blob and scan
+    try {
+      const blob = await new Promise(resolve =>
+        canvas.toBlob(resolve, 'image/jpeg', 0.9)
+      );
+      if (!blob) continue;
+
+      const file = new File([blob], `capture_${angle}.jpg`, { type: 'image/jpeg' });
+
+      // Create a temporary scanner for file scanning
+      const tempScanner = new Html5Qrcode('__capture_scan__', false);
+
+      // Create hidden container if needed
+      let hiddenDiv = document.getElementById('__capture_scan__');
+      if (!hiddenDiv) {
+        hiddenDiv = document.createElement('div');
+        hiddenDiv.id = '__capture_scan__';
+        hiddenDiv.style.display = 'none';
+        document.body.appendChild(hiddenDiv);
+      }
+
+      try {
+        const result = await tempScanner.scanFileV2(file, false);
+        tempScanner.clear();
+        hiddenDiv.remove();
+
+        if (result && result.decodedText) {
+          return {
+            text: result.decodedText,
+            format: result?.result?.format?.formatName || `rotated_${angle}°`
+          };
+        }
+      } catch {
+        // No barcode found at this angle — try next
+        try { tempScanner.clear(); } catch { /* ignore */ }
+      }
+    } catch {
+      // Canvas/blob error — try next angle
+    }
+  }
+
+  // Clean up hidden div
+  const hiddenDiv = document.getElementById('__capture_scan__');
+  if (hiddenDiv) hiddenDiv.remove();
+
+  return null;
+}
