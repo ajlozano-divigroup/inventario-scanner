@@ -1,10 +1,7 @@
 /**
- * Scanner module — Dual decoder strategy:
- * 1. html5-qrcode (ZXing) for continuous camera scanning
- * 2. Native BarcodeDetector API (when available) for better detection
- *    of barcodes at ANY angle (vertical, diagonal, etc.)
- *
- * Supports: torch, zoom, autofocus
+ * Scanner module — Simple, stable barcode/QR scanning
+ * Uses html5-qrcode with native BarcodeDetector (handles all orientations)
+ * Falls back to ZXing if native API not available
  */
 import { Html5Qrcode } from 'html5-qrcode';
 
@@ -16,12 +13,10 @@ let scanCallback = null;
 let isRunning = false;
 let lastScannedCode = '';
 let lastScanTime = 0;
-let nativeDetectorIntervalId = null;
-let nativeDetector = null;
 const DEBOUNCE_MS = 1500;
 
 /**
- * Start the scanner with dual detection
+ * Start the scanner
  */
 export async function startScanner(elementId, onScan) {
   if (isRunning) return;
@@ -29,16 +24,22 @@ export async function startScanner(elementId, onScan) {
   scanCallback = onScan;
   html5Qrcode = new Html5Qrcode(elementId);
 
+  // Check if native BarcodeDetector is available
+  const hasNativeDetector = 'BarcodeDetector' in window;
+
   const config = {
-    fps: 10,
+    fps: 5,
     qrbox: (viewfinderWidth, viewfinderHeight) => ({
       width: Math.floor(viewfinderWidth * 0.9),
-      height: Math.floor(viewfinderHeight * 0.6)
+      height: Math.floor(viewfinderHeight * 0.5)
     }),
     aspectRatio: 1.333,
     disableFlip: false,
     experimentalFeatures: {
-      useBarCodeDetectorIfSupported: false
+      // Use native BarcodeDetector if available — it handles
+      // barcodes at ANY angle (vertical, diagonal) and is
+      // hardware-accelerated. Falls back to ZXing JS otherwise.
+      useBarCodeDetectorIfSupported: hasNativeDetector
     }
   };
 
@@ -47,8 +48,21 @@ export async function startScanner(elementId, onScan) {
       { facingMode: 'environment' },
       config,
       (decodedText, result) => {
-        const format = result?.result?.format?.formatName || 'UNKNOWN';
-        handleDecode(decodedText, format);
+        const now = Date.now();
+        if (decodedText === lastScannedCode && (now - lastScanTime) < DEBOUNCE_MS) {
+          return;
+        }
+        lastScannedCode = decodedText;
+        lastScanTime = now;
+
+        if (navigator.vibrate) {
+          navigator.vibrate(100);
+        }
+
+        if (scanCallback) {
+          const format = result?.result?.format?.formatName || 'UNKNOWN';
+          scanCallback(decodedText, format);
+        }
       },
       () => {}
     );
@@ -60,10 +74,6 @@ export async function startScanner(elementId, onScan) {
       currentStream = videoElement.srcObject;
       await applyAdvancedCameraSettings();
     }
-
-    // Start native BarcodeDetector scanning in parallel
-    startNativeDetector(elementId);
-
   } catch (err) {
     console.error('Error starting scanner:', err);
     throw err;
@@ -71,128 +81,35 @@ export async function startScanner(elementId, onScan) {
 }
 
 /**
- * Handle a decoded barcode (from either ZXing or native detector)
- */
-function handleDecode(decodedText, format) {
-  const now = Date.now();
-  if (decodedText === lastScannedCode && (now - lastScanTime) < DEBOUNCE_MS) {
-    return;
-  }
-  lastScannedCode = decodedText;
-  lastScanTime = now;
-
-  if (navigator.vibrate) {
-    navigator.vibrate(100);
-  }
-
-  if (scanCallback) {
-    scanCallback(decodedText, format);
-  }
-}
-
-/**
- * Start the native BarcodeDetector API scanning.
- * This API detects barcodes at ANY orientation (vertical, angled, etc.)
- * and handles many more format edge cases than ZXing.
- * It runs in parallel with html5-qrcode and does NOT access the camera —
- * it just reads frames from the existing <video> element.
- */
-function startNativeDetector(elementId) {
-  // Check if BarcodeDetector API is available
-  if (!('BarcodeDetector' in window)) {
-    console.log('Native BarcodeDetector API not available, using ZXing only');
-    return;
-  }
-
-  try {
-    nativeDetector = new BarcodeDetector({
-      formats: [
-        'code_39', 'code_128', 'code_93',
-        'ean_13', 'ean_8',
-        'upc_a', 'upc_e',
-        'itf', 'codabar',
-        'qr_code', 'data_matrix', 'aztec', 'pdf417'
-      ]
-    });
-  } catch (err) {
-    console.warn('Failed to create BarcodeDetector:', err);
-    return;
-  }
-
-  console.log('Native BarcodeDetector active — supports all orientations');
-
-  nativeDetectorIntervalId = setInterval(async () => {
-    if (!isRunning) return;
-
-    try {
-      const videoElement = document.querySelector(`#${elementId} video`);
-      if (!videoElement || videoElement.readyState < 2) return;
-
-      const barcodes = await nativeDetector.detect(videoElement);
-
-      if (barcodes.length > 0) {
-        const barcode = barcodes[0];
-        handleDecode(barcode.rawValue, barcode.format);
-      }
-    } catch {
-      // Normal: detect() can fail on some frames
-    }
-  }, 300); // Scan every 300ms — native API is fast
-}
-
-function stopNativeDetector() {
-  if (nativeDetectorIntervalId) {
-    clearInterval(nativeDetectorIntervalId);
-    nativeDetectorIntervalId = null;
-  }
-  nativeDetector = null;
-}
-
-/**
- * Apply advanced camera settings (autofocus, exposure)
+ * Apply autofocus + exposure settings
  */
 async function applyAdvancedCameraSettings() {
   const track = getVideoTrack();
   if (!track) return;
-
   try {
-    const capabilities = track.getCapabilities();
+    const caps = track.getCapabilities();
     const adv = {};
-
-    if (capabilities.focusMode?.includes('continuous')) {
-      adv.focusMode = 'continuous';
-    }
-    if (capabilities.exposureMode?.includes('continuous')) {
-      adv.exposureMode = 'continuous';
-    }
-    if (capabilities.whiteBalanceMode?.includes('continuous')) {
-      adv.whiteBalanceMode = 'continuous';
-    }
-
+    if (caps.focusMode?.includes('continuous')) adv.focusMode = 'continuous';
+    if (caps.exposureMode?.includes('continuous')) adv.exposureMode = 'continuous';
     if (Object.keys(adv).length > 0) {
       await track.applyConstraints({ advanced: [adv] });
     }
-  } catch (err) {
-    console.warn('Could not apply advanced camera settings:', err);
-  }
+  } catch { /* ignore */ }
 }
 
 /**
- * Trigger manual refocus (tap-to-focus)
+ * Tap-to-focus
  */
 export async function triggerRefocus() {
   const track = getVideoTrack();
   if (!track) return;
-
   try {
-    const capabilities = track.getCapabilities();
-    if (capabilities.focusMode) {
-      if (capabilities.focusMode.includes('manual')) {
-        await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] });
-      }
+    const caps = track.getCapabilities();
+    if (caps.focusMode?.includes('manual')) {
+      await track.applyConstraints({ advanced: [{ focusMode: 'manual' }] });
       setTimeout(async () => {
         try {
-          if (capabilities.focusMode.includes('continuous')) {
+          if (caps.focusMode.includes('continuous')) {
             await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
           }
         } catch { /* ignore */ }
@@ -206,16 +123,12 @@ export async function triggerRefocus() {
  */
 export async function stopScanner() {
   if (!html5Qrcode || !isRunning) return;
-
-  stopNativeDetector();
-
   try {
     await html5Qrcode.stop();
     html5Qrcode.clear();
   } catch (err) {
     console.error('Error stopping scanner:', err);
   }
-
   html5Qrcode = null;
   currentStream = null;
   isRunning = false;
