@@ -28,18 +28,17 @@ export async function startScanner(elementId, onScan) {
   const hasNativeDetector = 'BarcodeDetector' in window;
 
   const config = {
-    fps: 5,
+    fps: 8,
     qrbox: (viewfinderWidth, viewfinderHeight) => ({
-      width: Math.floor(viewfinderWidth * 0.9),
-      height: Math.floor(viewfinderHeight * 0.5)
+      width: Math.floor(viewfinderWidth * 0.95),
+      height: Math.floor(viewfinderHeight * 0.80)
     }),
-    aspectRatio: 1.333,
     disableFlip: false,
     experimentalFeatures: {
-      // Use native BarcodeDetector if available — it handles
-      // barcodes at ANY angle (vertical, diagonal) and is
-      // hardware-accelerated. Falls back to ZXing JS otherwise.
-      useBarCodeDetectorIfSupported: hasNativeDetector
+      // ALWAYS use native BarcodeDetector — it handles formats and
+      // orientations that ZXing cannot (e.g. the Code 39 vertical barcode).
+      // Other scanner apps use this same API and read the barcode fine.
+      useBarCodeDetectorIfSupported: true
     }
   };
 
