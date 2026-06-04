@@ -250,17 +250,17 @@ export async function captureAndScan(elementId) {
   }
 
   // === Strategy 2: ZXing via html5-qrcode (fallback) ===
-  // Only use 0° and 90°. Do NOT use 180°/270° because they reverse
-  // the barcode reading direction, causing ZXing to decode wrong characters.
-  // Instead, for each angle also try a horizontal flip to cover both directions.
+  // Try all 4 rotations. Order matters: 270° is tried BEFORE 90° because
+  // for vertical barcodes on labels, 90° reads right-to-left (wrong: 731311)
+  // while 270° reads left-to-right (correct: 600134). First match wins.
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
   const transforms = [
-    { label: '0°', setup: () => { canvas.width = vw; canvas.height = vh; ctx.drawImage(videoElement, 0, 0); } },
-    { label: '0° flip', setup: () => { canvas.width = vw; canvas.height = vh; ctx.translate(vw, 0); ctx.scale(-1, 1); ctx.drawImage(videoElement, 0, 0); } },
-    { label: '90°', setup: () => { canvas.width = vh; canvas.height = vw; ctx.translate(vh, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(videoElement, 0, 0); } },
-    { label: '90° flip', setup: () => { canvas.width = vh; canvas.height = vw; ctx.translate(0, 0); ctx.scale(-1, 1); ctx.translate(-vh, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(videoElement, 0, 0); } },
+    { label: '0°', w: vw, h: vh, angle: 0 },
+    { label: '270°', w: vh, h: vw, angle: 270 },
+    { label: '180°', w: vw, h: vh, angle: 180 },
+    { label: '90°', w: vh, h: vw, angle: 90 },
   ];
 
   // Create hidden container for temp scanner
@@ -273,8 +273,19 @@ export async function captureAndScan(elementId) {
   }
 
   for (const t of transforms) {
+    // Set canvas size and draw rotated frame
+    canvas.width = t.w;
+    canvas.height = t.h;
     ctx.save();
-    t.setup();
+    if (t.angle === 90) {
+      ctx.translate(t.w, 0);
+    } else if (t.angle === 180) {
+      ctx.translate(t.w, t.h);
+    } else if (t.angle === 270) {
+      ctx.translate(0, t.h);
+    }
+    ctx.rotate((t.angle * Math.PI) / 180);
+    ctx.drawImage(videoElement, 0, 0, vw, vh);
     ctx.restore();
 
     try {
