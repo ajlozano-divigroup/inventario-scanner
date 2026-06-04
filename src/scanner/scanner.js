@@ -60,20 +60,12 @@ export async function startScanner(elementId, onScan) {
     }
   };
 
-  // Request high resolution + continuous autofocus
-  const cameraConstraints = {
-    facingMode: 'environment',
-    width: { ideal: 1920, min: 1280 },
-    height: { ideal: 1080, min: 720 },
-    focusMode: { ideal: 'continuous' },
-    // Prefer a wider aperture / higher exposure for reading labels
-    exposureMode: { ideal: 'continuous' },
-    whiteBalanceMode: { ideal: 'continuous' }
-  };
-
   try {
+    // html5-qrcode only accepts facingMode here, not full MediaTrackConstraints.
+    // Advanced settings (resolution, autofocus, etc.) are applied AFTER
+    // the stream starts, via applyAdvancedCameraSettings().
     await html5Qrcode.start(
-      cameraConstraints,
+      { facingMode: 'environment' },
       config,
       (decodedText, result) => {
         const now = Date.now();
