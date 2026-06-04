@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="Escáner de códigos de barras y QR para verificación de inventario" />
+  <meta name="theme-color" content="#0f0f1a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <title>Inventario 2.0 — Escáner</title>
+</head>
+<body>
+  <!-- Toast notifications -->
+  <div id="toast-container"></div>
+
+  <!-- App shell -->
+  <div id="app">
+
+    <!-- ========== SCREEN: Dashboard ========== -->
+    <section id="screen-dashboard" class="screen active">
+      <header class="screen-header">
+        <div class="logo">
+          <svg class="logo-icon" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="2.5"/>
+            <rect x="24" y="2" width="14" height="14" rx="3" stroke="currentColor" stroke-width="2.5"/>
+            <rect x="2" y="24" width="14" height="14" rx="3" stroke="currentColor" stroke-width="2.5"/>
+            <rect x="26" y="26" width="10" height="10" rx="2" fill="currentColor"/>
+            <circle cx="9" cy="9" r="3" fill="currentColor"/>
+          </svg>
+          <h1>Inventario <span class="accent">2.0</span></h1>
+        </div>
+      </header>
+
+      <div class="screen-body dashboard-body">
+        <!-- Status card -->
+        <div id="dashboard-status" class="glass-card status-card">
+          <div class="status-indicator" id="status-indicator">
+            <div class="status-dot offline"></div>
+            <span id="status-text">Sin inventario cargado</span>
+          </div>
+          <div id="dashboard-stats" class="stats-grid hidden">
+            <div class="stat-item">
+              <span class="stat-value" id="stat-total">0</span>
+              <span class="stat-label">Total</span>
+            </div>
+            <div class="stat-item found">
+              <span class="stat-value" id="stat-found">0</span>
+              <span class="stat-label">Encontrados</span>
+            </div>
+            <div class="stat-item not-found">
+              <span class="stat-value" id="stat-unknown">0</span>
+              <span class="stat-label">No reconocidos</span>
+            </div>
+            <div class="stat-item pending">
+              <span class="stat-value" id="stat-pending">0</span>
+              <span class="stat-label">Pendientes</span>
+            </div>
+          </div>
+          <!-- Progress bar -->
+          <div id="dashboard-progress" class="progress-container hidden">
+            <div class="progress-bar">
+              <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+            </div>
+            <span class="progress-text" id="progress-text">0%</span>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="action-grid">
+          <button id="btn-import" class="action-btn primary-btn glass-card">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="12" y1="18" x2="12" y2="12"/>
+                <polyline points="9 15 12 12 15 15"/>
+              </svg>
+            </div>
+            <span class="btn-label">Importar Excel</span>
+            <span class="btn-sublabel">Cargar inventario .xlsx</span>
+          </button>
+
+          <button id="btn-scan" class="action-btn scan-btn glass-card" disabled>
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 4V1h3"/>
+                <path d="M20 1h3v3"/>
+                <path d="M23 20v3h-3"/>
+                <path d="M4 23H1v-3"/>
+                <line x1="1" y1="12" x2="7" y2="12"/>
+                <line x1="10" y1="12" x2="14" y2="12"/>
+                <line x1="17" y1="12" x2="23" y2="12"/>
+              </svg>
+            </div>
+            <span class="btn-label">Escanear</span>
+            <span class="btn-sublabel">Verificar inventario</span>
+          </button>
+
+          <button id="btn-test-mode" class="action-btn test-btn glass-card">
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="16" x2="12" y2="12"/>
+                <line x1="12" y1="8" x2="12.01" y2="8"/>
+              </svg>
+            </div>
+            <span class="btn-label">Modo Prueba</span>
+            <span class="btn-sublabel">Escanear sin inventario</span>
+          </button>
+
+          <button id="btn-results" class="action-btn results-btn glass-card" disabled>
+            <div class="btn-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+              </svg>
+            </div>
+            <span class="btn-label">Resultados</span>
+            <span class="btn-sublabel">Ver informe</span>
+          </button>
+        </div>
+
+        <!-- Quick actions -->
+        <div id="quick-actions" class="quick-actions hidden">
+          <button id="btn-export" class="quick-btn glass-card">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            <span>Exportar informe</span>
+          </button>
+          <button id="btn-clear" class="quick-btn glass-card danger">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span>Limpiar sesión</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SCREEN: Import ========== -->
+    <section id="screen-import" class="screen">
+      <header class="screen-header">
+        <button class="back-btn" data-target="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h2>Importar Excel</h2>
+      </header>
+
+      <div class="screen-body">
+        <!-- File drop zone -->
+        <div id="drop-zone" class="glass-card drop-zone">
+          <div class="drop-icon">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M28 4H12a4 4 0 0 0-4 4v32a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4V16z"/>
+              <polyline points="28 4 28 16 40 16"/>
+              <line x1="24" y1="36" x2="24" y2="24"/>
+              <polyline points="18 30 24 24 30 30"/>
+            </svg>
+          </div>
+          <p class="drop-text">Pulsa para seleccionar archivo</p>
+          <p class="drop-subtext">.xlsx / .xls</p>
+          <input type="file" id="file-input" accept=".xlsx,.xls" hidden />
+        </div>
+
+        <!-- File preview -->
+        <div id="import-preview" class="glass-card import-preview hidden">
+          <div class="preview-header">
+            <h3 id="file-name">archivo.xlsx</h3>
+            <span id="file-rows" class="badge">0 filas</span>
+          </div>
+          <div class="preview-table-wrap">
+            <table id="preview-table" class="preview-table">
+              <thead id="preview-thead"></thead>
+              <tbody id="preview-tbody"></tbody>
+            </table>
+          </div>
+
+          <!-- Column selector -->
+          <div class="column-selector">
+            <label for="column-select">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-icon">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              Columna de referencia (la que coincide con el código de barras):
+            </label>
+            <select id="column-select" class="select-input"></select>
+          </div>
+
+          <!-- Cleaning options -->
+          <div class="clean-options">
+            <label class="checkbox-label">
+              <input type="checkbox" id="strip-asterisks" checked />
+              <span class="checkbox-custom"></span>
+              Quitar asteriscos (*) de las referencias
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="trim-spaces" checked />
+              <span class="checkbox-custom"></span>
+              Quitar espacios al inicio/final
+            </label>
+          </div>
+
+          <button id="btn-confirm-import" class="primary-action-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+            Confirmar importación
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SCREEN: Scanner ========== -->
+    <section id="screen-scanner" class="screen">
+      <header class="screen-header scanner-header">
+        <button class="back-btn" id="btn-stop-scan" data-target="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h2 id="scanner-title">Escáner</h2>
+        <div class="scanner-controls">
+          <button id="btn-torch" class="icon-btn" title="Linterna">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="screen-body scanner-body">
+        <!-- Camera viewfinder -->
+        <div class="scanner-viewport">
+          <div id="scanner-reader" class="scanner-reader"></div>
+          <div class="scan-overlay">
+            <div class="scan-frame">
+              <div class="scan-corner tl"></div>
+              <div class="scan-corner tr"></div>
+              <div class="scan-corner bl"></div>
+              <div class="scan-corner br"></div>
+              <div class="scan-line"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Zoom control -->
+        <div class="zoom-control glass-card">
+          <button id="btn-zoom-out" class="zoom-btn">−</button>
+          <input type="range" id="zoom-slider" min="1" max="5" step="0.1" value="1" class="zoom-slider" />
+          <button id="btn-zoom-in" class="zoom-btn">+</button>
+          <span id="zoom-value" class="zoom-value">1.0x</span>
+        </div>
+
+        <!-- Scan result popup -->
+        <div id="scan-result" class="scan-result hidden">
+          <div id="scan-result-inner" class="scan-result-inner glass-card">
+            <div class="scan-result-icon" id="scan-result-icon"></div>
+            <div class="scan-result-info">
+              <span class="scan-result-code" id="scan-result-code"></span>
+              <span class="scan-result-status" id="scan-result-status"></span>
+              <div class="scan-result-details" id="scan-result-details"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scan history -->
+        <div class="scan-history glass-card">
+          <div class="scan-history-header">
+            <h3>Últimos escaneos</h3>
+            <span id="scan-count" class="badge">0</span>
+          </div>
+          <ul id="scan-history-list" class="scan-history-list">
+            <li class="empty-state">Escanea un código para empezar</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SCREEN: Results ========== -->
+    <section id="screen-results" class="screen">
+      <header class="screen-header">
+        <button class="back-btn" data-target="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h2>Resultados</h2>
+        <button id="btn-export-results" class="icon-btn" title="Exportar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+      </header>
+
+      <div class="screen-body">
+        <!-- Progress summary -->
+        <div class="glass-card results-summary">
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" id="results-progress-fill" style="width: 0%"></div>
+            </div>
+            <span class="progress-text" id="results-progress-text">0 de 0 verificadas (0%)</span>
+          </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab active" data-tab="found">
+            <span class="tab-icon">✅</span>
+            Encontrados
+            <span class="tab-count" id="tab-count-found">0</span>
+          </button>
+          <button class="tab" data-tab="unknown">
+            <span class="tab-icon">❌</span>
+            No reconocidos
+            <span class="tab-count" id="tab-count-unknown">0</span>
+          </button>
+          <button class="tab" data-tab="pending">
+            <span class="tab-icon">⏳</span>
+            Pendientes
+            <span class="tab-count" id="tab-count-pending">0</span>
+          </button>
+        </div>
+
+        <!-- Search -->
+        <div class="search-bar glass-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="results-search" placeholder="Buscar referencia..." class="search-input" />
+        </div>
+
+        <!-- Tab content -->
+        <div id="tab-found" class="tab-content active">
+          <ul id="list-found" class="result-list"></ul>
+        </div>
+        <div id="tab-unknown" class="tab-content">
+          <ul id="list-unknown" class="result-list"></ul>
+        </div>
+        <div id="tab-pending" class="tab-content">
+          <ul id="list-pending" class="result-list"></ul>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Confirmation modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal glass-card">
+      <h3 id="modal-title">Confirmar</h3>
+      <p id="modal-message">¿Estás seguro?</p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="modal-btn secondary">Cancelar</button>
+        <button id="modal-confirm" class="modal-btn primary">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
