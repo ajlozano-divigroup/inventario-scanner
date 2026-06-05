@@ -76,7 +76,7 @@ export async function startScanner(elementId, onScan) {
 }
 
 /**
- * Apply autofocus + exposure settings
+ * Apply autofocus + exposure + HIGH RESOLUTION settings
  */
 async function applyAdvancedCameraSettings() {
   const track = getVideoTrack();
@@ -88,6 +88,28 @@ async function applyAdvancedCameraSettings() {
     if (caps.exposureMode?.includes('continuous')) adv.exposureMode = 'continuous';
     if (Object.keys(adv).length > 0) {
       await track.applyConstraints({ advanced: [adv] });
+    }
+
+    // Request maximum available resolution
+    // This is critical: default is often 480×640 (VGA) which has too few
+    // pixels to decode thin barcode bars. We need at least 1080p.
+    const maxWidth = caps.width?.max || 1920;
+    const maxHeight = caps.height?.max || 1080;
+    try {
+      await track.applyConstraints({
+        width: { ideal: maxWidth },
+        height: { ideal: maxHeight }
+      });
+      console.log(`Camera resolution requested: ${maxWidth}×${maxHeight}`);
+    } catch (resErr) {
+      console.warn('Could not increase resolution:', resErr);
+      // Try a more conservative resolution
+      try {
+        await track.applyConstraints({
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        });
+      } catch { /* keep default */ }
     }
   } catch { /* ignore */ }
 }
