@@ -1,7 +1,7 @@
 /**
  * OCR module — Read printed text from camera frames
  * Uses Tesseract.js for digit recognition on labels.
- * Only loaded on-demand (when capture button is pressed).
+ * Only loaded on-demand (when capture/OCR button is pressed).
  */
 
 let worker = null;
@@ -19,57 +19,23 @@ async function getWorker() {
   await worker.setParameters({
     // Only recognize digits — faster and more accurate for inventory labels
     tessedit_char_whitelist: '0123456789',
-    tessedit_pageseg_mode: '7', // Treat image as a single text line
+    // PSM 6: Assume uniform block of text (works better than single line for labels)
+    tessedit_pageseg_mode: '6',
   });
   return worker;
 }
 
 /**
- * Run OCR on a video element or canvas.
- * Returns an array of detected digit sequences (sorted by length, longest first).
- * @param {HTMLVideoElement|HTMLCanvasElement} source
- * @returns {Promise<string[]>} array of digit strings found
+ * Run OCR on a canvas or image source.
+ * Returns an array of detected digit sequences (3+ digits, sorted longest first).
  */
-export async function recognizeDigits(source) {
-  // Draw source to a preprocessed canvas
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  let sw, sh;
-  if (source instanceof HTMLVideoElement) {
-    sw = source.videoWidth;
-    sh = source.videoHeight;
-  } else {
-    sw = source.width;
-    sh = source.height;
-  }
-
-  // Scale down to max 800px for speed
-  const maxDim = 800;
-  const scale = Math.min(maxDim / sw, maxDim / sh, 1);
-  canvas.width = Math.round(sw * scale);
-  canvas.height = Math.round(sh * scale);
-  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-
-  // Preprocess: grayscale + high contrast + binary threshold
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  for (let i = 0; i < data.length; i += 4) {
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const bw = gray > 140 ? 255 : 0;
-    data[i] = data[i + 1] = data[i + 2] = bw;
-  }
-  ctx.putImageData(imageData, 0, 0);
-
+async function recognizeFromCanvas(canvas) {
   try {
     const w = await getWorker();
     const result = await w.recognize(canvas);
-
-    // Extract digit sequences (3+ digits)
     const text = result.data.text || '';
+    // Extract digit sequences of 3+ digits
     const matches = text.match(/\d{3,}/g) || [];
-
-    // Sort by length descending (prefer longer sequences)
     return matches.sort((a, b) => b.length - a.length);
   } catch (err) {
     console.error('OCR error:', err);
@@ -78,8 +44,25 @@ export async function recognizeDigits(source) {
 }
 
 /**
- * Try OCR on a video element at multiple rotations.
- * Returns the best match (longest digit sequence) or null.
+ * Preprocess a video frame for OCR: grayscale only (no binary threshold).
+ * Binary threshold can destroy thin characters at low resolution.
+ */
+function drawPreprocessed(ctx, source, w, h) {
+  ctx.drawImage(source, 0, 0, w, h);
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    // Simple grayscale + mild contrast boost
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.5 + 128));
+    data[i] = data[i + 1] = data[i + 2] = boosted;
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+/**
+ * Try OCR on a video element at ALL 4 rotations.
+ * Returns the best match (longest digit sequence of 4+ chars) or null.
  */
 export async function ocrFromVideo(videoElement) {
   if (!videoElement || videoElement.readyState < 2) return null;
@@ -88,24 +71,46 @@ export async function ocrFromVideo(videoElement) {
   const vh = videoElement.videoHeight;
   if (!vw || !vh) return null;
 
-  // Try original orientation first
-  let results = await recognizeDigits(videoElement);
-  if (results.length > 0 && results[0].length >= 4) {
-    return results[0];
-  }
+  // Scale down for speed (max 640px on longest side)
+  const maxDim = 640;
+  const scale = Math.min(maxDim / Math.max(vw, vh), 1);
+  const sw = Math.round(vw * scale);
+  const sh = Math.round(vh * scale);
 
-  // Try 90° rotation (for vertical labels)
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = vh;
-  canvas.height = vw;
-  ctx.translate(vh, 0);
-  ctx.rotate(Math.PI / 2);
-  ctx.drawImage(videoElement, 0, 0, vw, vh);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-  results = await recognizeDigits(canvas);
-  if (results.length > 0 && results[0].length >= 4) {
-    return results[0];
+  // Try all 4 rotations: the label text might be at any angle
+  const rotations = [
+    { angle: 0, w: sw, h: sh },
+    { angle: 90, w: sh, h: sw },
+    { angle: 270, w: sh, h: sw },
+    { angle: 180, w: sw, h: sh },
+  ];
+
+  for (const rot of rotations) {
+    canvas.width = rot.w;
+    canvas.height = rot.h;
+
+    ctx.save();
+    if (rot.angle === 90) {
+      ctx.translate(rot.w, 0);
+      ctx.rotate(Math.PI / 2);
+    } else if (rot.angle === 180) {
+      ctx.translate(rot.w, rot.h);
+      ctx.rotate(Math.PI);
+    } else if (rot.angle === 270) {
+      ctx.translate(0, rot.h);
+      ctx.rotate(-Math.PI / 2);
+    }
+    drawPreprocessed(ctx, videoElement, sw, sh);
+    ctx.restore();
+
+    const results = await recognizeFromCanvas(canvas);
+    if (results.length > 0 && results[0].length >= 4) {
+      console.log(`OCR found "${results[0]}" at ${rot.angle}°`);
+      return results[0];
+    }
   }
 
   return null;
