@@ -288,18 +288,6 @@ export async function captureAndScan(elementId) {
   }
 
   if (hiddenDiv) hiddenDiv.remove();
-
-  // === Strategy 3: OCR — read printed digits from the label ===
-  try {
-    const { ocrFromVideo } = await import('./ocr.js');
-    const ocrResult = await ocrFromVideo(videoElement);
-    if (ocrResult) {
-      return { text: ocrResult, format: 'OCR' };
-    }
-  } catch (err) {
-    console.warn('OCR fallback failed:', err);
-  }
-
   return null;
 }
 

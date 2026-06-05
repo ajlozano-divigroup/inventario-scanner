@@ -375,9 +375,9 @@ function bindScanner() {
       const result = await captureAndScan('scanner-reader');
       if (result) {
         handleScanResult(result.text, result.format);
-        showSuccess(`¡Código encontrado${result.format === 'OCR' ? ' (OCR)' : ''}! ${result.text}`);
+        showSuccess(`¡Código encontrado! ${result.text}`);
       } else {
-        showWarning('No se detectó nada. Prueba el botón OCR para leer el texto de la etiqueta.');
+        showWarning('No se detectó código de barras. Prueba con el botón OCR para leer el número.');
       }
     } catch (err) {
       showError('Error al capturar');
@@ -385,7 +385,7 @@ function bindScanner() {
     }
 
     btn.disabled = false;
-    btn.textContent = '📸 Capturar (barcode + OCR)';
+    btn.textContent = '📸 Capturar código de barras';
   });
 
   // OCR-only button
@@ -408,7 +408,7 @@ function bindScanner() {
     }
 
     ocrBtn.disabled = false;
-    ocrBtn.textContent = '🔤 Leer texto de la etiqueta (OCR)';
+    ocrBtn.textContent = '🔤 Leer número de la etiqueta (OCR)';
   });
 
   // Manual input: toggle form visibility
