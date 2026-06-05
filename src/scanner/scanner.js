@@ -29,7 +29,7 @@ export async function startScanner(elementId, onScan) {
   const hasNativeDetector = 'BarcodeDetector' in window;
 
   const config = {
-    fps: 10,
+    fps: 4,
     // NO qrbox — scan the ENTIRE camera frame.
     // qrbox cropping was cutting off barcodes and reducing resolution.
     disableFlip: false,
@@ -264,32 +264,22 @@ export function startDetectionOverlay(elementId, canvasId) {
       const rawBarcodes = await detector.detect(videoElement);
       allBarcodes.push(...rawBarcodes);
 
-      // === Pass 2: Try contrast-enhanced frame (for faded/low-contrast barcodes) ===
+      // === Pass 2: Contrast-enhanced frame (scaled down to avoid crash) ===
       if (rawBarcodes.length === 0) {
-        procCanvas.width = vw;
-        procCanvas.height = vh;
-        procCtx.drawImage(videoElement, 0, 0, vw, vh);
+        const PROC_W = 640;
+        const scale = PROC_W / vw;
+        const PROC_H = Math.round(vh * scale);
+        procCanvas.width = PROC_W;
+        procCanvas.height = PROC_H;
+        procCtx.drawImage(videoElement, 0, 0, PROC_W, PROC_H);
 
-        // Apply contrast enhancement + binary threshold
-        const imageData = procCtx.getImageData(0, 0, vw, vh);
+        const imageData = procCtx.getImageData(0, 0, PROC_W, PROC_H);
         const data = imageData.data;
-
         for (let i = 0; i < data.length; i += 4) {
-          // Convert to grayscale
           const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-
-          // Increase contrast (stretch histogram)
-          const contrast = 2.0; // 2x contrast boost
-          const adjusted = ((gray / 255 - 0.5) * contrast + 0.5) * 255;
-
-          // Binary threshold: make it pure black or white
-          const bw = adjusted > 128 ? 255 : 0;
-
-          data[i] = bw;
-          data[i + 1] = bw;
-          data[i + 2] = bw;
+          const bw = ((gray / 255 - 0.5) * 2.0 + 0.5) * 255 > 128 ? 255 : 0;
+          data[i] = data[i + 1] = data[i + 2] = bw;
         }
-
         procCtx.putImageData(imageData, 0, 0);
 
         const enhancedBarcodes = await detector.detect(procCanvas);
@@ -347,7 +337,7 @@ export function startDetectionOverlay(elementId, canvasId) {
       ? `✅ ${allBarcodes.length} código(s) | ${vw}×${vh}`
       : `🔍 Buscando... | Cámara: ${vw}×${vh} | API nativa: ${'BarcodeDetector' in window ? 'SÍ' : 'NO'}`;
     ctx.fillText(statusText, 10, canvas.height - 10);
-  }, 200); // 5 times per second
+  }, 350); // ~3 times per second (stable on mobile)
 }
 
 export function stopDetectionOverlay() {
