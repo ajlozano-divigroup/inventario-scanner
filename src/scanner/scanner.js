@@ -1,7 +1,7 @@
 /**
- * Scanner module — Simple, stable barcode/QR scanning
- * Uses html5-qrcode with native BarcodeDetector (handles all orientations)
- * Falls back to ZXing if native API not available
+ * Scanner module — Stable barcode/QR scanning
+ * Uses html5-qrcode with native BarcodeDetector when available.
+ * Lightweight: no heavy overlays, no pixel processing.
  */
 import { Html5Qrcode } from 'html5-qrcode';
 
@@ -14,7 +14,6 @@ let isRunning = false;
 let lastScannedCode = '';
 let lastScanTime = 0;
 const DEBOUNCE_MS = 1500;
-let detectionOverlayId = null;
 
 /**
  * Start the scanner
@@ -25,13 +24,8 @@ export async function startScanner(elementId, onScan) {
   scanCallback = onScan;
   html5Qrcode = new Html5Qrcode(elementId);
 
-  // Check if native BarcodeDetector is available
-  const hasNativeDetector = 'BarcodeDetector' in window;
-
   const config = {
-    fps: 4,
-    // NO qrbox — scan the ENTIRE camera frame.
-    // qrbox cropping was cutting off barcodes and reducing resolution.
+    fps: 5,
     disableFlip: false,
     experimentalFeatures: {
       useBarCodeDetectorIfSupported: true
@@ -76,7 +70,7 @@ export async function startScanner(elementId, onScan) {
 }
 
 /**
- * Apply autofocus + exposure + HIGH RESOLUTION settings
+ * Apply autofocus + try to get 720p resolution
  */
 async function applyAdvancedCameraSettings() {
   const track = getVideoTrack();
@@ -89,28 +83,13 @@ async function applyAdvancedCameraSettings() {
     if (Object.keys(adv).length > 0) {
       await track.applyConstraints({ advanced: [adv] });
     }
-
-    // Request maximum available resolution
-    // This is critical: default is often 480×640 (VGA) which has too few
-    // pixels to decode thin barcode bars. We need at least 1080p.
-    const maxWidth = caps.width?.max || 1920;
-    const maxHeight = caps.height?.max || 1080;
+    // Try 720p — much better than 480p but won't crash like 1080p
     try {
       await track.applyConstraints({
-        width: { ideal: maxWidth },
-        height: { ideal: maxHeight }
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
       });
-      console.log(`Camera resolution requested: ${maxWidth}×${maxHeight}`);
-    } catch (resErr) {
-      console.warn('Could not increase resolution:', resErr);
-      // Try a more conservative resolution
-      try {
-        await track.applyConstraints({
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        });
-      } catch { /* keep default */ }
-    }
+    } catch { /* keep default */ }
   } catch { /* ignore */ }
 }
 
@@ -207,164 +186,18 @@ export function isTorchEnabled() { return torchEnabled; }
 export function getCurrentZoom() { return currentZoom; }
 
 /**
- * Start a visual detection overlay that draws bounding boxes
- * around any barcodes the native BarcodeDetector can see.
- * This runs independently from html5-qrcode scanning.
+ * Get current camera resolution for debug display
  */
-export function startDetectionOverlay(elementId, canvasId) {
-  if (!('BarcodeDetector' in window)) {
-    console.warn('BarcodeDetector not available — no detection overlay');
-    return;
-  }
-
-  const detector = new BarcodeDetector({
-    formats: [
-      'code_39', 'code_128', 'code_93',
-      'ean_13', 'ean_8',
-      'upc_a', 'upc_e',
-      'itf', 'codabar',
-      'qr_code', 'data_matrix', 'aztec', 'pdf417'
-    ]
-  });
-
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-
-  // Offscreen canvas for image preprocessing
-  const procCanvas = document.createElement('canvas');
-  const procCtx = procCanvas.getContext('2d', { willReadFrequently: true });
-
-  detectionOverlayId = setInterval(async () => {
-    if (!isRunning) return;
-
-    const videoElement = document.querySelector(`#${elementId} video`);
-    if (!videoElement || videoElement.readyState < 2) return;
-
-    const vw = videoElement.videoWidth;
-    const vh = videoElement.videoHeight;
-    if (!vw || !vh) return;
-
-    // Match display canvas to video display size
-    const rect = videoElement.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-
-    // Scale factors: video resolution → display size
-    const sx = rect.width / vw;
-    const sy = rect.height / vh;
-
-    // Clear previous frame
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    let allBarcodes = [];
-
-    try {
-      // === Pass 1: Try raw video frame (fast) ===
-      const rawBarcodes = await detector.detect(videoElement);
-      allBarcodes.push(...rawBarcodes);
-
-      // === Pass 2: Contrast-enhanced frame (scaled down to avoid crash) ===
-      if (rawBarcodes.length === 0) {
-        const PROC_W = 640;
-        const scale = PROC_W / vw;
-        const PROC_H = Math.round(vh * scale);
-        procCanvas.width = PROC_W;
-        procCanvas.height = PROC_H;
-        procCtx.drawImage(videoElement, 0, 0, PROC_W, PROC_H);
-
-        const imageData = procCtx.getImageData(0, 0, PROC_W, PROC_H);
-        const data = imageData.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-          const bw = ((gray / 255 - 0.5) * 2.0 + 0.5) * 255 > 128 ? 255 : 0;
-          data[i] = data[i + 1] = data[i + 2] = bw;
-        }
-        procCtx.putImageData(imageData, 0, 0);
-
-        const enhancedBarcodes = await detector.detect(procCanvas);
-        allBarcodes.push(...enhancedBarcodes);
-      }
-    } catch {
-      // detect() can fail on some frames
-    }
-
-    // Draw results
-    for (const barcode of allBarcodes) {
-      const points = barcode.cornerPoints;
-      if (!points || points.length < 4) continue;
-
-      // Draw polygon around barcode
-      ctx.beginPath();
-      ctx.moveTo(points[0].x * sx, points[0].y * sy);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x * sx, points[i].y * sy);
-      }
-      ctx.closePath();
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = '#22c55e';
-      ctx.stroke();
-
-      // Fill with semi-transparent green
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.1)';
-      ctx.fill();
-
-      // Draw corner dots
-      for (const p of points) {
-        ctx.beginPath();
-        ctx.arc(p.x * sx, p.y * sy, 6, 0, Math.PI * 2);
-        ctx.fillStyle = '#22c55e';
-        ctx.fill();
-      }
-
-      // Draw label with value
-      const labelX = points[0].x * sx;
-      const labelY = points[0].y * sy - 12;
-      ctx.font = 'bold 16px Inter, sans-serif';
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = '#000';
-      ctx.strokeText(barcode.rawValue, labelX, labelY);
-      ctx.fillStyle = '#22c55e';
-      ctx.fillText(barcode.rawValue, labelX, labelY);
-    }
-
-    // Status indicator with debug info
-    ctx.font = '11px Inter, sans-serif';
-    ctx.fillStyle = allBarcodes.length > 0
-      ? 'rgba(34, 197, 94, 0.8)'
-      : 'rgba(255,255,255,0.5)';
-    const statusText = allBarcodes.length > 0
-      ? `✅ ${allBarcodes.length} código(s) | ${vw}×${vh}`
-      : `🔍 Buscando... | Cámara: ${vw}×${vh} | API nativa: ${'BarcodeDetector' in window ? 'SÍ' : 'NO'}`;
-    ctx.fillText(statusText, 10, canvas.height - 10);
-  }, 350); // ~3 times per second (stable on mobile)
-}
-
-export function stopDetectionOverlay() {
-  if (detectionOverlayId) {
-    clearInterval(detectionOverlayId);
-    detectionOverlayId = null;
-  }
-  const canvas = document.getElementById('detection-canvas');
-  if (canvas) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
+export function getCameraResolution(elementId) {
+  const videoElement = document.querySelector(`#${elementId} video`);
+  if (!videoElement) return null;
+  return { w: videoElement.videoWidth, h: videoElement.videoHeight };
 }
 
 /**
- * Capture current video frame, rotate it in 4 angles, and try to
- * scan each rotation. Returns the first successful decode or null.
- * This is a manual fallback for barcodes that the live scanner can't
- * read (e.g. vertical 1D barcodes).
- *
- * Strategy:
- * 1. Try native BarcodeDetector API first (handles all orientations correctly)
- * 2. Fall back to ZXing with 0° and 90° rotations + horizontal flip
- *    (180°/270° cause reversed reads → wrong data like 731311 instead of 600134)
- *
- * @param {string} elementId - Scanner container element ID
- * @returns {Promise<{text: string, format: string} | null>}
+ * Capture current video frame and try to scan it using the native
+ * BarcodeDetector at multiple rotations. Falls back to ZXing scanFile.
+ * Lightweight: no pixel manipulation, just rotation.
  */
 export async function captureAndScan(elementId) {
   const videoElement = document.querySelector(`#${elementId} video`);
@@ -374,59 +207,44 @@ export async function captureAndScan(elementId) {
   const vh = videoElement.videoHeight;
   if (!vw || !vh) return null;
 
-  // === Strategy 1: Native BarcodeDetector (best — handles orientation + direction) ===
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // === Strategy 1: Native BarcodeDetector (handles orientation) ===
   if ('BarcodeDetector' in window) {
     try {
       const detector = new BarcodeDetector({
         formats: [
           'code_39', 'code_128', 'code_93',
-          'ean_13', 'ean_8',
-          'upc_a', 'upc_e',
+          'ean_13', 'ean_8', 'upc_a', 'upc_e',
           'itf', 'codabar',
           'qr_code', 'data_matrix', 'aztec', 'pdf417'
         ]
       });
 
-      // Try on the raw video frame first (handles all orientations natively)
-      const barcodes = await detector.detect(videoElement);
+      // Try raw frame
+      let barcodes = await detector.detect(videoElement);
       if (barcodes.length > 0) {
         return { text: barcodes[0].rawValue, format: barcodes[0].format };
       }
 
-      // If not found, try on a rotated canvas (some implementations
-      // still struggle with vertical 1D barcodes)
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      canvas.width = vh;
-      canvas.height = vw;
+      // Try 90° rotation
+      canvas.width = vh; canvas.height = vw;
       ctx.translate(vh, 0);
       ctx.rotate(Math.PI / 2);
       ctx.drawImage(videoElement, 0, 0, vw, vh);
-
-      const rotatedBarcodes = await detector.detect(canvas);
-      if (rotatedBarcodes.length > 0) {
-        return { text: rotatedBarcodes[0].rawValue, format: rotatedBarcodes[0].format };
+      barcodes = await detector.detect(canvas);
+      if (barcodes.length > 0) {
+        return { text: barcodes[0].rawValue, format: barcodes[0].format };
       }
     } catch (err) {
-      console.warn('Native BarcodeDetector capture failed:', err);
+      console.warn('Native capture failed:', err);
     }
   }
 
-  // === Strategy 2: ZXing via html5-qrcode (fallback) ===
-  // Try all 4 rotations. Order matters: 270° is tried BEFORE 90° because
-  // for vertical barcodes on labels, 90° reads right-to-left (wrong: 731311)
-  // while 270° reads left-to-right (correct: 600134). First match wins.
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+  // === Strategy 2: ZXing file scan at 270° (correct direction for vertical barcodes) ===
+  const rotations = [270, 0, 90, 180];
 
-  const transforms = [
-    { label: '0°', w: vw, h: vh, angle: 0 },
-    { label: '270°', w: vh, h: vw, angle: 270 },
-    { label: '180°', w: vw, h: vh, angle: 180 },
-    { label: '90°', w: vh, h: vw, angle: 90 },
-  ];
-
-  // Create hidden container for temp scanner
   let hiddenDiv = document.getElementById('__capture_scan__');
   if (!hiddenDiv) {
     hiddenDiv = document.createElement('div');
@@ -435,48 +253,41 @@ export async function captureAndScan(elementId) {
     document.body.appendChild(hiddenDiv);
   }
 
-  for (const t of transforms) {
-    // Set canvas size and draw rotated frame
-    canvas.width = t.w;
-    canvas.height = t.h;
-    ctx.save();
-    if (t.angle === 90) {
-      ctx.translate(t.w, 0);
-    } else if (t.angle === 180) {
-      ctx.translate(t.w, t.h);
-    } else if (t.angle === 270) {
-      ctx.translate(0, t.h);
+  for (const angle of rotations) {
+    if (angle === 90 || angle === 270) {
+      canvas.width = vh; canvas.height = vw;
+    } else {
+      canvas.width = vw; canvas.height = vh;
     }
-    ctx.rotate((t.angle * Math.PI) / 180);
+
+    ctx.save();
+    if (angle === 90) ctx.translate(vh, 0);
+    else if (angle === 180) ctx.translate(vw, vh);
+    else if (angle === 270) ctx.translate(0, vw);
+    ctx.rotate((angle * Math.PI) / 180);
     ctx.drawImage(videoElement, 0, 0, vw, vh);
     ctx.restore();
 
     try {
-      const blob = await new Promise(resolve =>
-        canvas.toBlob(resolve, 'image/jpeg', 0.9)
-      );
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
       if (!blob) continue;
-
-      const file = new File([blob], `capture.jpg`, { type: 'image/jpeg' });
-      const tempScanner = new Html5Qrcode('__capture_scan__', false);
-
+      const file = new File([blob], 'c.jpg', { type: 'image/jpeg' });
+      const tmp = new Html5Qrcode('__capture_scan__', false);
       try {
-        const result = await tempScanner.scanFileV2(file, false);
-        tempScanner.clear();
-
+        const result = await tmp.scanFileV2(file, false);
+        tmp.clear();
         if (result && result.decodedText) {
           hiddenDiv.remove();
-          return {
-            text: result.decodedText,
-            format: result?.result?.format?.formatName || t.label
-          };
+          return { text: result.decodedText, format: result?.result?.format?.formatName || `${angle}°` };
         }
-      } catch {
-        try { tempScanner.clear(); } catch { /* ignore */ }
-      }
-    } catch { /* next transform */ }
+      } catch { try { tmp.clear(); } catch {} }
+    } catch {}
   }
 
   if (hiddenDiv) hiddenDiv.remove();
   return null;
 }
+
+// No-op functions for detection overlay (removed for stability)
+export function startDetectionOverlay() {}
+export function stopDetectionOverlay() {}
