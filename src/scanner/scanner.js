@@ -27,8 +27,11 @@ export async function startScanner(elementId, onScan) {
   const config = {
     fps: 5,
     disableFlip: false,
+    formatsToSupport: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
     experimentalFeatures: {
-      useBarCodeDetectorIfSupported: true
+      // DISABLED: native BarcodeDetector can't read this barcode format.
+      // ZXing JS decoder CAN — but needs barcode to be horizontal.
+      useBarCodeDetectorIfSupported: false
     }
   };
 
