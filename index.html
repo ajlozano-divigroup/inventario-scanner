@@ -272,9 +272,14 @@
           <span id="zoom-value" class="zoom-value">1.0x</span>
         </div>
 
-        <!-- Capture button for difficult barcodes -->
+        <!-- Capture button (barcode + OCR fallback) -->
         <button id="btn-capture" class="primary-action-btn capture-btn">
-          📸 Capturar y escanear (códigos difíciles)
+          📸 Capturar (barcode + OCR)
+        </button>
+
+        <!-- OCR-only button -->
+        <button id="btn-ocr" class="primary-action-btn ocr-btn">
+          🔤 Leer texto de la etiqueta (OCR)
         </button>
 
         <!-- Manual input for unreadable barcodes -->

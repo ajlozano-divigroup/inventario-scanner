@@ -5,7 +5,7 @@
 import './style.css';
 import { initDB, saveInventory, getAllInventory, getInventoryCount, saveScan, getAllScans, getScansCount, isScanDuplicate, saveSession, getSession, clearAll, clearScans } from './inventory/storage.js';
 import { parseExcelFile, cleanReference, buildInventoryItems } from './inventory/importer.js';
-import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus, captureAndScan, startDetectionOverlay, stopDetectionOverlay } from './scanner/scanner.js';
+import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, isTorchSupported, triggerRefocus, captureAndScan, ocrScan, startDetectionOverlay, stopDetectionOverlay } from './scanner/scanner.js';
 import { findMatch, buildInventoryMap, computeStats, categorizeResults } from './inventory/matcher.js';
 import { showToast, showSuccess, showError, showWarning, showInfo } from './ui/toast.js';
 import { exportReport } from './export/exporter.js';
@@ -374,11 +374,10 @@ function bindScanner() {
     try {
       const result = await captureAndScan('scanner-reader');
       if (result) {
-        // Found a barcode! Process it like a normal scan
         handleScanResult(result.text, result.format);
-        showSuccess(`¡Código encontrado! ${result.text}`);
+        showSuccess(`¡Código encontrado${result.format === 'OCR' ? ' (OCR)' : ''}! ${result.text}`);
       } else {
-        showWarning('No se detectó ningún código. Acerca más el móvil e intenta de nuevo.');
+        showWarning('No se detectó nada. Prueba el botón OCR para leer el texto de la etiqueta.');
       }
     } catch (err) {
       showError('Error al capturar');
@@ -386,7 +385,30 @@ function bindScanner() {
     }
 
     btn.disabled = false;
-    btn.textContent = '📸 Capturar y escanear (códigos difíciles)';
+    btn.textContent = '📸 Capturar (barcode + OCR)';
+  });
+
+  // OCR-only button
+  const ocrBtn = document.getElementById('btn-ocr');
+  ocrBtn.addEventListener('click', async () => {
+    ocrBtn.disabled = true;
+    ocrBtn.textContent = '🔄 Leyendo texto...';
+
+    try {
+      const result = await ocrScan('scanner-reader');
+      if (result) {
+        handleScanResult(result.text, 'OCR');
+        showSuccess(`Texto leído (OCR): ${result.text}`);
+      } else {
+        showWarning('No se pudo leer texto. Acerca más la cámara al número impreso.');
+      }
+    } catch (err) {
+      showError('Error OCR');
+      console.error(err);
+    }
+
+    ocrBtn.disabled = false;
+    ocrBtn.textContent = '🔤 Leer texto de la etiqueta (OCR)';
   });
 
   // Manual input: toggle form visibility
