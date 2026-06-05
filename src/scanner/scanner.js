@@ -39,13 +39,8 @@ export async function startScanner(elementId, onScan) {
   };
 
   try {
-    // Request HD resolution with ideal constraints (won't fail if unsupported)
     await html5Qrcode.start(
-      {
-        facingMode: 'environment',
-        width: { ideal: 1920 },
-        height: { ideal: 1080 }
-      },
+      { facingMode: 'environment' },
       config,
       (decodedText, result) => {
         const now = Date.now();
