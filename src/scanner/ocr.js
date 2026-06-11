@@ -46,12 +46,13 @@ async function recognizeFromCanvas(canvas) {
 }
 
 /**
- * Preprocess a video frame for OCR using Bradley-Roth Adaptive Thresholding.
+ * Preprocess a canvas in-place using Bradley-Roth Adaptive Thresholding.
  * This binarizes the image adaptively to eliminate shadows, highlight handwritten strokes,
  * and provide a clean black-and-white image to Tesseract.
  */
-function drawPreprocessed(ctx, source, w, h) {
-  ctx.drawImage(source, 0, 0, w, h);
+function preprocessCanvas(canvas, ctx) {
+  const w = canvas.width;
+  const h = canvas.height;
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
 
@@ -122,8 +123,9 @@ function drawPreprocessed(ctx, source, w, h) {
 }
 
 /**
- * Try OCR on a video element at ALL 4 rotations.
- * Returns the best match (longest digit sequence of 4+ chars) or null.
+ * Try OCR on a video element by cropping the central viewport area,
+ * binarizing it adaptively, and recognizing it at all 4 rotations.
+ * Returns the best match (longest digit sequence of 3+ chars) or null.
  */
 export async function ocrFromVideo(videoElement) {
   if (!videoElement || videoElement.readyState < 2) return null;
@@ -138,15 +140,43 @@ export async function ocrFromVideo(videoElement) {
   const sw = Math.round(vw * scale);
   const sh = Math.round(vh * scale);
 
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  // Define crop bounds in scaled coordinate system (Focus on the central scanning box)
+  const cropW = Math.round(sw * 0.70);
+  const cropH = Math.round(sh * 0.45);
+  const cropX = Math.round((sw - cropW) / 2);
+  const cropY = Math.round((sh - cropH) / 2);
 
-  // Try all 4 rotations: the label text might be at any angle
+  // 1. Create a temporary canvas to hold the cropped frame
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = cropW;
+  tempCanvas.height = cropH;
+  const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+  
+  // Draw the cropped center from videoElement
+  tempCtx.drawImage(
+    videoElement,
+    Math.round(cropX / scale),
+    Math.round(cropY / scale),
+    Math.round(cropW / scale),
+    Math.round(cropH / scale),
+    0,
+    0,
+    cropW,
+    cropH
+  );
+
+  // 2. Preprocess the cropped frame ONCE (Grayscale + Bradley-Roth Adaptive Thresholding)
+  preprocessCanvas(tempCanvas, tempCtx);
+
+  // 3. Try all 4 rotations: the label text might be at any angle (drawn properly using drawImage)
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
   const rotations = [
-    { angle: 0, w: sw, h: sh },
-    { angle: 90, w: sh, h: sw },
-    { angle: 270, w: sh, h: sw },
-    { angle: 180, w: sw, h: sh },
+    { angle: 0, w: cropW, h: cropH },
+    { angle: 90, w: cropH, h: cropW },
+    { angle: 270, w: cropH, h: cropW },
+    { angle: 180, w: cropW, h: cropH },
   ];
 
   for (const rot of rotations) {
@@ -164,11 +194,12 @@ export async function ocrFromVideo(videoElement) {
       ctx.translate(0, rot.h);
       ctx.rotate(-Math.PI / 2);
     }
-    drawPreprocessed(ctx, videoElement, sw, sh);
+    // Draw preprocessed frame with rotation (respects context transforms)
+    ctx.drawImage(tempCanvas, 0, 0, cropW, cropH);
     ctx.restore();
 
     const results = await recognizeFromCanvas(canvas);
-    if (results.length > 0 && results[0].length >= 4) {
+    if (results.length > 0 && results[0].length >= 3) {
       console.log(`OCR found "${results[0]}" at ${rot.angle}°`);
       return results[0];
     }
