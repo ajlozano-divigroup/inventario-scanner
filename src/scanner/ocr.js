@@ -19,8 +19,10 @@ async function getWorker() {
   await worker.setParameters({
     // Only recognize digits — faster and more accurate for inventory labels
     tessedit_char_whitelist: '0123456789',
-    // PSM 6: Assume uniform block of text (works better than single line for labels)
-    tessedit_pageseg_mode: '6',
+    // PSM 7: Treat the image as a single text line (excellent for tags/labels)
+    tessedit_pageseg_mode: '7',
+    tessjs_create_hocr: '0',
+    tessjs_create_tsv: '0',
   });
   return worker;
 }
@@ -44,19 +46,78 @@ async function recognizeFromCanvas(canvas) {
 }
 
 /**
- * Preprocess a video frame for OCR: grayscale only (no binary threshold).
- * Binary threshold can destroy thin characters at low resolution.
+ * Preprocess a video frame for OCR using Bradley-Roth Adaptive Thresholding.
+ * This binarizes the image adaptively to eliminate shadows, highlight handwritten strokes,
+ * and provide a clean black-and-white image to Tesseract.
  */
 function drawPreprocessed(ctx, source, w, h) {
   ctx.drawImage(source, 0, 0, w, h);
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
+
+  // 1. Calculate grayscale values
+  const gray = new Uint8Array(w * h);
   for (let i = 0; i < data.length; i += 4) {
-    // Simple grayscale + mild contrast boost
-    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-    const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.5 + 128));
-    data[i] = data[i + 1] = data[i + 2] = boosted;
+    gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
   }
+
+  // 2. Compute 2D Integral Image (Summed-Area Table)
+  const intImg = new Uint32Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let sum = 0;
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+      sum += gray[idx];
+      if (y === 0) {
+        intImg[idx] = sum;
+      } else {
+        intImg[idx] = intImg[(y - 1) * w + x] + sum;
+      }
+    }
+  }
+
+  // 3. Bradley-Roth Adaptive Thresholding
+  const S = Math.round(w / 8); // Window size (typically 1/8 of image width)
+  const T = 15; // Threshold percentage
+  const s2 = Math.round(S / 2);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const idx = y * w + x;
+
+      // Determine local window boundaries
+      const x1 = Math.max(0, x - s2);
+      const x2 = Math.min(w - 1, x + s2);
+      const y1 = Math.max(0, y - s2);
+      const y2 = Math.min(h - 1, y + s2);
+
+      const count = (x2 - x1 + 1) * (y2 - y1 + 1);
+
+      // Sum values inside the S x S window using integral image
+      let sum = intImg[y2 * w + x2];
+      if (x1 > 0) {
+        sum -= intImg[y2 * w + (x1 - 1)];
+      }
+      if (y1 > 0) {
+        sum -= intImg[(y1 - 1) * w + x2];
+      }
+      if (x1 > 0 && y1 > 0) {
+        sum += intImg[(y1 - 1) * w + (x1 - 1)];
+      }
+
+      // Check if local pixel is significantly darker than the average of its neighbors
+      const value = gray[idx];
+      const isDarker = (value * count * 100) < (sum * (100 - T));
+      const binarized = isDarker ? 0 : 255;
+
+      const dataIdx = idx * 4;
+      data[dataIdx] = binarized;
+      data[dataIdx + 1] = binarized;
+      data[dataIdx + 2] = binarized;
+      // data[dataIdx + 3] remains unchanged (alpha channel)
+    }
+  }
+
   ctx.putImageData(imageData, 0, 0);
 }
 
