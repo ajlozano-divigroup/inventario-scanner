@@ -19,8 +19,8 @@ async function getWorker() {
   await worker.setParameters({
     // Only recognize digits — faster and more accurate for inventory labels
     tessedit_char_whitelist: '0123456789',
-    // PSM 7: Treat the image as a single text line (excellent for tags/labels)
-    tessedit_pageseg_mode: '7',
+    // PSM 6: Assume uniform block of text (works better than single line for labels)
+    tessedit_pageseg_mode: '6',
     tessjs_create_hocr: '0',
     tessjs_create_tsv: '0',
   });
@@ -46,9 +46,8 @@ async function recognizeFromCanvas(canvas) {
 }
 
 /**
- * Preprocess a canvas in-place using Bradley-Roth Adaptive Thresholding.
- * This binarizes the image adaptively to eliminate shadows, highlight handwritten strokes,
- * and provide a clean black-and-white image to Tesseract.
+ * Preprocess a canvas in-place using Grayscale + Contrast Boost.
+ * This ensures smooth edges and helps Tesseract's internal binarizer read digits correctly.
  */
 function preprocessCanvas(canvas, ctx) {
   const w = canvas.width;
@@ -56,75 +55,19 @@ function preprocessCanvas(canvas, ctx) {
   const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
 
-  // 1. Calculate grayscale values
-  const gray = new Uint8Array(w * h);
   for (let i = 0; i < data.length; i += 4) {
-    gray[i / 4] = Math.round(0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]);
-  }
-
-  // 2. Compute 2D Integral Image (Summed-Area Table)
-  const intImg = new Uint32Array(w * h);
-  for (let y = 0; y < h; y++) {
-    let sum = 0;
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-      sum += gray[idx];
-      if (y === 0) {
-        intImg[idx] = sum;
-      } else {
-        intImg[idx] = intImg[(y - 1) * w + x] + sum;
-      }
-    }
-  }
-
-  // 3. Bradley-Roth Adaptive Thresholding
-  const S = Math.round(w / 8); // Window size (typically 1/8 of image width)
-  const T = 15; // Threshold percentage
-  const s2 = Math.round(S / 2);
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const idx = y * w + x;
-
-      // Determine local window boundaries
-      const x1 = Math.max(0, x - s2);
-      const x2 = Math.min(w - 1, x + s2);
-      const y1 = Math.max(0, y - s2);
-      const y2 = Math.min(h - 1, y + s2);
-
-      const count = (x2 - x1 + 1) * (y2 - y1 + 1);
-
-      // Sum values inside the S x S window using integral image
-      let sum = intImg[y2 * w + x2];
-      if (x1 > 0) {
-        sum -= intImg[y2 * w + (x1 - 1)];
-      }
-      if (y1 > 0) {
-        sum -= intImg[(y1 - 1) * w + x2];
-      }
-      if (x1 > 0 && y1 > 0) {
-        sum += intImg[(y1 - 1) * w + (x1 - 1)];
-      }
-
-      // Check if local pixel is significantly darker than the average of its neighbors
-      const value = gray[idx];
-      const isDarker = (value * count * 100) < (sum * (100 - T));
-      const binarized = isDarker ? 0 : 255;
-
-      const dataIdx = idx * 4;
-      data[dataIdx] = binarized;
-      data[dataIdx + 1] = binarized;
-      data[dataIdx + 2] = binarized;
-      // data[dataIdx + 3] remains unchanged (alpha channel)
-    }
+    // Simple grayscale + mild contrast boost
+    const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const boosted = Math.min(255, Math.max(0, (gray - 128) * 1.5 + 128));
+    data[i] = data[i + 1] = data[i + 2] = boosted;
   }
 
   ctx.putImageData(imageData, 0, 0);
 }
 
 /**
- * Try OCR on a video element by cropping the central viewport area,
- * binarizing it adaptively, and recognizing it at all 4 rotations.
+ * Try OCR on a video element by scaling the full frame, preprocessing it once,
+ * and recognizing it at all 4 rotations (using Canvas 2D translation and rotation).
  * Returns the best match (longest digit sequence of 3+ chars) or null.
  */
 export async function ocrFromVideo(videoElement) {
@@ -140,43 +83,27 @@ export async function ocrFromVideo(videoElement) {
   const sw = Math.round(vw * scale);
   const sh = Math.round(vh * scale);
 
-  // Define crop bounds in scaled coordinate system (Focus on the central scanning box)
-  const cropW = Math.round(sw * 0.70);
-  const cropH = Math.round(sh * 0.45);
-  const cropX = Math.round((sw - cropW) / 2);
-  const cropY = Math.round((sh - cropH) / 2);
-
-  // 1. Create a temporary canvas to hold the cropped frame
+  // 1. Create a temporary canvas to hold the full frame
   const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = cropW;
-  tempCanvas.height = cropH;
+  tempCanvas.width = sw;
+  tempCanvas.height = sh;
   const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
   
-  // Draw the cropped center from videoElement
-  tempCtx.drawImage(
-    videoElement,
-    Math.round(cropX / scale),
-    Math.round(cropY / scale),
-    Math.round(cropW / scale),
-    Math.round(cropH / scale),
-    0,
-    0,
-    cropW,
-    cropH
-  );
+  // Draw the full frame from videoElement
+  tempCtx.drawImage(videoElement, 0, 0, sw, sh);
 
-  // 2. Preprocess the cropped frame ONCE (Grayscale + Bradley-Roth Adaptive Thresholding)
+  // 2. Preprocess the frame ONCE (Grayscale + Contrast Boost)
   preprocessCanvas(tempCanvas, tempCtx);
 
-  // 3. Try all 4 rotations: the label text might be at any angle (drawn properly using drawImage)
+  // 3. Try all 4 rotations: the label text might be at any angle
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
 
   const rotations = [
-    { angle: 0, w: cropW, h: cropH },
-    { angle: 90, w: cropH, h: cropW },
-    { angle: 270, w: cropH, h: cropW },
-    { angle: 180, w: cropW, h: cropH },
+    { angle: 0, w: sw, h: sh },
+    { angle: 90, w: sh, h: sw },
+    { angle: 270, w: sh, h: sw },
+    { angle: 180, w: sw, h: sh },
   ];
 
   for (const rot of rotations) {
@@ -195,7 +122,7 @@ export async function ocrFromVideo(videoElement) {
       ctx.rotate(-Math.PI / 2);
     }
     // Draw preprocessed frame with rotation (respects context transforms)
-    ctx.drawImage(tempCanvas, 0, 0, cropW, cropH);
+    ctx.drawImage(tempCanvas, 0, 0, sw, sh);
     ctx.restore();
 
     const results = await recognizeFromCanvas(canvas);
