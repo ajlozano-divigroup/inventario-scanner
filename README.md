@@ -20,10 +20,15 @@ Se implementaron las siguientes mejoras técnicas para aumentar significativamen
 1. **Binarización Adaptativa (Algoritmo de Bradley-Roth)**:
    - Se reemplazó el procesamiento de contraste estático por una binarización dinámica basada en una ventana local (1/8 del ancho de la imagen) con integral 2D.
    - Elimina sombras de iluminación irregular (como las producidas al sostener el móvil) y aísla los trazos oscuros sobre fondos claros, asegurando un contraste óptimo.
-2. **Ajuste de Segmentación de Página (PSM 7)**:
+2. **Recorte de Región de Interés (Crop ROI)**:
+   - Se limita el área de análisis de la cámara exclusivamente al centro del recuadro (70% del ancho y 45% de la altura).
+   - Esto anula el ruido y las interferencias visuales circundantes (manos, fondos de mesa, teclados) y acelera drásticamente el proceso al analizar un lienzo mucho menor.
+3. **Corrección de Rotaciones de Cámara**:
+   - Se resolvió un error de sobreescritura donde las rotaciones se anulaban por el uso de métodos nativos no transformados (`putImageData`). Ahora la imagen binarizada se rota y se redibuja de manera óptima usando `drawImage`.
+4. **Ajuste de Segmentación de Página (PSM 7)**:
    - Se reconfiguró Tesseract.js de `PSM 6` (bloque de texto) a `PSM 7` (línea única de texto).
    - Esto evita que el motor intente agrupar o detectar diseños estructurados complejos en el lienzo, centrándose exclusivamente en secuencias de dígitos individuales continuas.
-3. **Desactivación de Salidas Innecesarias**:
+5. **Desactivación de Salidas Innecesarias**:
    - Se configuraron los parámetros `tessjs_create_hocr: '0'` y `tessjs_create_tsv: '0'` para agilizar el proceso y reducir el consumo de CPU.
 
 ### Mejoras Futuras Identificadas
