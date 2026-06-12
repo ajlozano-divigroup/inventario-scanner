@@ -35,6 +35,13 @@
           </svg>
           <h1>Inventario <span class="accent">2.0</span></h1>
         </div>
+        <div style="flex: 1;"></div>
+        <button id="btn-settings" class="icon-btn" title="Ajustes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
       </header>
 
       <div class="screen-body dashboard-body">
@@ -386,6 +393,48 @@
         </div>
         <div id="tab-pending" class="tab-content">
           <ul id="list-pending" class="result-list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SCREEN: Settings ========== -->
+    <section id="screen-settings" class="screen">
+      <header class="screen-header">
+        <button class="back-btn" data-target="dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </button>
+        <h2>Ajustes de OCR</h2>
+      </header>
+
+      <div class="screen-body">
+        <div class="glass-card settings-card">
+          <div class="setting-item">
+            <label for="ocr-engine-select">Motor de Reconocimiento OCR:</label>
+            <select id="ocr-engine-select" class="select-input">
+              <option value="local">Local (Tesseract.js — Gratuito y Offline)</option>
+              <option value="gemini">Nube (Gemini 1.5 Flash — Precisión Premium)</option>
+            </select>
+          </div>
+
+          <div id="gemini-settings-group" class="hidden" style="display: flex; flex-direction: column; gap: var(--space-lg);">
+            <div class="setting-item">
+              <label for="gemini-api-key">Gemini API Key:</label>
+              <input type="password" id="gemini-api-key" class="manual-input" placeholder="Introduce tu Gemini API Key..." />
+              <span class="help-text">La clave se guarda localmente en el móvil y viaja cifrada directamente a Google. Consíguela en <a href="https://aistudio.google.com/" target="_blank" rel="noopener">Google AI Studio</a>.</span>
+            </div>
+
+            <div class="setting-item">
+              <label for="gemini-prompt">Instrucciones del Reconocimiento (Prompt):</label>
+              <textarea id="gemini-prompt" class="manual-input" rows="3" placeholder="Instrucciones para Gemini..."></textarea>
+              <span class="help-text">Instrucciones sobre qué extraer y cómo limpiarlo.</span>
+            </div>
+          </div>
+
+          <button id="btn-save-settings" class="primary-action-btn" style="margin-top: 1rem;">
+            Guardar Ajustes
+          </button>
         </div>
       </div>
     </section>

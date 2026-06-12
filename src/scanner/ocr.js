@@ -4,6 +4,9 @@
  * Only loaded on-demand (when capture/OCR button is pressed).
  */
 
+import { getSettings } from '../ui/settings.js';
+import { ocrWithGemini } from './gemini.js';
+
 let worker = null;
 
 /**
@@ -76,6 +79,14 @@ export async function ocrFromVideo(videoElement) {
   const vw = videoElement.videoWidth;
   const vh = videoElement.videoHeight;
   if (!vw || !vh) return null;
+
+  const settings = getSettings();
+  if (settings.engine === 'gemini') {
+    if (!settings.apiKey) {
+      throw new Error('API Key de Gemini no configurada. Por favor, configúrala en Ajustes.');
+    }
+    return ocrWithGemini(videoElement, settings.apiKey, settings.prompt);
+  }
 
   // Scale down for speed (max 640px on longest side)
   const maxDim = 640;

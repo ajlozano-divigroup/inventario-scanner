@@ -306,6 +306,7 @@ export async function ocrScan(elementId) {
     }
   } catch (err) {
     console.warn('OCR scan failed:', err);
+    throw err;
   }
   return null;
 }

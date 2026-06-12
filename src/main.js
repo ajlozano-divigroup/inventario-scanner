@@ -9,6 +9,7 @@ import { startScanner, stopScanner, toggleTorch, setZoom, getZoomCapabilities, i
 import { findMatch, buildInventoryMap, computeStats, categorizeResults } from './inventory/matcher.js';
 import { showToast, showSuccess, showError, showWarning, showInfo } from './ui/toast.js';
 import { exportReport } from './export/exporter.js';
+import { getSettings, saveSettings } from './ui/settings.js';
 
 // ============================================================
 // App State
@@ -41,6 +42,7 @@ async function init() {
   bindScanner();
   bindResults();
   bindModal();
+  bindSettings();
 
   // Update UI
   updateDashboard();
@@ -403,7 +405,7 @@ function bindScanner() {
         showWarning('No se pudo leer texto. Acerca más la cámara al número impreso.');
       }
     } catch (err) {
-      showError('Error OCR');
+      showError(err.message || 'Error OCR');
       console.error(err);
     }
 
@@ -763,6 +765,54 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+// ============================================================
+// Settings
+// ============================================================
+function bindSettings() {
+  const settingsBtn = document.getElementById('btn-settings');
+  const engineSelect = document.getElementById('ocr-engine-select');
+  const geminiGroup = document.getElementById('gemini-settings-group');
+  const saveBtn = document.getElementById('btn-save-settings');
+
+  settingsBtn.addEventListener('click', () => {
+    const settings = getSettings();
+    engineSelect.value = settings.engine;
+    document.getElementById('gemini-api-key').value = settings.apiKey;
+    document.getElementById('gemini-prompt').value = settings.prompt;
+
+    if (settings.engine === 'gemini') {
+      geminiGroup.classList.remove('hidden');
+    } else {
+      geminiGroup.classList.add('hidden');
+    }
+
+    navigateTo('settings');
+  });
+
+  engineSelect.addEventListener('change', () => {
+    if (engineSelect.value === 'gemini') {
+      geminiGroup.classList.remove('hidden');
+    } else {
+      geminiGroup.classList.add('hidden');
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    const engine = engineSelect.value;
+    const apiKey = document.getElementById('gemini-api-key').value.trim();
+    const prompt = document.getElementById('gemini-prompt').value.trim();
+
+    if (engine === 'gemini' && !apiKey) {
+      showError('Por favor, introduce tu API Key de Gemini');
+      return;
+    }
+
+    saveSettings({ engine, apiKey, prompt });
+    showSuccess('Ajustes guardados correctamente');
+    navigateTo('dashboard');
+  });
 }
 
 // ============================================================
